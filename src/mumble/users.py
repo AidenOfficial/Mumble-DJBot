@@ -174,13 +174,13 @@ class User:
         if message.HasField("comment_hash"):
             if message.HasField("comment"):
                 self.connection.blobs[message.comment_hash] = message.comment
-            else:
-                self.connection.blobs.get_user_comment(message.comment_hash)
+            elif message.comment_hash not in self.connection.blobs:
+                self.connection.request_user_comment_blob(message.comment_hash)
         if message.HasField("texture_hash"):
             if message.HasField("texture"):
                 self.connection.blobs[message.texture_hash] = message.texture
-            else:
-                self.connection.blobs.get_user_texture(message.texture_hash)
+            elif message.comment_hash not in self.connection.blobs:
+                self.connection.request_user_texture_blob(message.texture_hash)
 
         for field, value in message.ListFields():
             if field.name in (

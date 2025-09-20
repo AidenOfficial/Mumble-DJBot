@@ -167,8 +167,8 @@ class Channel(dict):
             )
             if message.HasField("description"):
                 self.mumble_object.blobs[message.description_hash] = message.description
-            else:
-                self.mumble_object.blobs.get_channel_description(
+            elif message.description_hash not in self.mumble_object.blobs:
+                self.mumble_object.request_channel_description_blob(
                     message.description_hash
                 )
 

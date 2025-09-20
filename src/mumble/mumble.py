@@ -9,7 +9,6 @@ import struct
 import google.protobuf.message as protobuf_message
 import typing as t
 
-from .blobs import Blobs
 from .callbacks import Callbacks
 from .channels import Channels
 from .commands import Commands
@@ -598,7 +597,7 @@ class Mumble(threading.Thread):
 
         self.users = Users(self)
         self.channels = Channels(self)
-        self.blobs = Blobs(self)
+        self.blobs = dict()
         if self.enable_audio:
             from .audio import SendAudio
 
@@ -1235,6 +1234,21 @@ class Mumble(threading.Thread):
 
     def denial_type(self, n: str):
         return Mumble_pb2.PermissionDenied.DenyType.Name(n)
+
+    def request_user_comment_blob(self, comment_hash):
+        request = Mumble_pb2.RequestBlob()
+        request.session_comment.extend(struct.unpack("!5I", comment_hash))
+        self.send_message(TCP_MSG_TYPE.RequestBlob, request)
+
+    def request_user_texture_blob(self, texture_hash):
+        request = Mumble_pb2.RequestBlob()
+        request.session_texture.extend(struct.unpack("!5I", texture_hash))
+        self.send_message(TCP_MSG_TYPE.RequestBlob, request)
+
+    def request_channel_description_blob(self, description_hash):
+        request = Mumble_pb2.RequestBlob()
+        request.channel_description.extend(struct.unpack("!5I", description_hash))
+        self.send_message(TCP_MSG_TYPE.RequestBlob, request)
 
     def stop(self):
         """Disconnect from the server, stop the main loop and close the TLS socket."""
