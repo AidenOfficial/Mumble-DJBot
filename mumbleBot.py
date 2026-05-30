@@ -19,6 +19,7 @@ import logging
 import logging.handlers
 import traceback
 import struct
+import collections
 from packaging import version
 
 import util
@@ -61,6 +62,19 @@ class MumbleBot:
         self.read_pcm_size = 0
         self.pcm_buffer_size = 0
         self.last_ffmpeg_err = ""
+        self._ffmpeg_stderr_lines = collections.deque(maxlen=20)
+
+        # Single-instance guard so the same item never spawns two concurrent
+        # download / progress-reporter threads (which would double every
+        # download message in chat).
+        self._active_downloads = set()
+        self._download_lock = threading.Lock()
+
+        # Liveness tracking for the watchdog and the (Docker) healthcheck.
+        self.last_loop_at = time.time()
+        self._last_heartbeat_write = 0.0
+        self.heartbeat_file = os.environ.get("BAM_HEARTBEAT") or \
+            os.path.join(var.tmp_folder, "botamusique.heartbeat")
 
         # Play/pause status
         self.is_pause = False
@@ -118,6 +132,10 @@ class MumbleBot:
                                       stereo=self.stereo,
                                       debug=var.config.getboolean('debug', 'mumble_connection'),
                                       certfile=certificate)
+        # pymumble >=1.7 only creates the outgoing-audio handler (sound_output)
+        # when receive_sound is set, so enable it before the mumble thread
+        # starts - otherwise the bot cannot play audio unless ducking is on.
+        self.mumble.receive_sound = True
         self.mumble.callbacks.set_callback(pymumble.constants.PYMUMBLE_CLBK_TEXTMESSAGERECEIVED, self.message_received)
 
         self.mumble.set_codec_profile("audio")
@@ -125,7 +143,8 @@ class MumbleBot:
         self.mumble.is_ready()  # wait for the connection
 
         if self.mumble.connected >= pymumble.constants.PYMUMBLE_CONN_STATE_FAILED:
-            exit()
+            self.log.error("bot: failed to connect to the Mumble server.")
+            sys.exit(1)
 
         self.set_comment()
         self.set_avatar()
@@ -162,6 +181,10 @@ class MumbleBot:
 
         self.ducking_threshold = var.config.getfloat("bot", "ducking_threshold")
         self.ducking_threshold = var.db.getfloat("bot", "ducking_threshold", fallback=self.ducking_threshold)
+
+        self.ducking_delay = var.config.getfloat("bot", "ducking_delay")
+        self.ducking_delay = var.db.getfloat("bot", "ducking_delay", fallback=self.ducking_delay)
+        self.ducking_loud_since = 0
 
         if not var.db.has_option("bot", "ducking") and var.config.getboolean("bot", "ducking") \
                 or var.config.getboolean("bot", "ducking"):
@@ -434,19 +457,54 @@ class MumbleBot:
         channels = 2 if self.stereo else 1
         self.pcm_buffer_size = 960 * channels
 
-        command = ("ffmpeg", '-v', ffmpeg_debug, '-nostdin', '-i',
-                   uri, '-ss', f"{start_from:f}", '-ac', str(channels), '-f', 's16le', '-ar', '48000', '-')
+        command = ["ffmpeg", '-v', ffmpeg_debug, '-nostdin', '-i', uri, '-ss', f"{start_from:f}",
+                   # Decode audio only. Without this, ffmpeg may try to handle a
+                   # video / cover-art stream from a container (mp4/mkv, or a
+                   # YouTube/Bilibili "best" format) and fail to produce PCM -
+                   # which used to take playback (and sometimes the bot) down.
+                   '-vn', '-map', '0:a:0?']
+
+        # Loudness normalization (EBU R128): keeps loud and quiet tracks at a
+        # consistent volume so the bot can serve as background music without
+        # anyone adjusting the volume by hand.
+        if var.config.getboolean('bot', 'normalize_volume'):
+            target = var.config.get('bot', 'normalize_volume_target')
+            command += ['-af', f"loudnorm=I={target}:TP=-1.5:LRA=11"]
+
+        command += ['-ac', str(channels), '-f', 's16le', '-ar', '48000', '-']
         self.log.debug("bot: execute ffmpeg command: " + " ".join(command))
 
-        # The ffmpeg process is a thread
-        # prepare pipe for catching stderr of ffmpeg
-        if self.redirect_ffmpeg_log:
-            pipe_rd, pipe_wd = util.pipe_no_wait()  # Let the pipe work in non-blocking mode
-            self.thread_stderr = os.fdopen(pipe_rd)
-        else:
-            pipe_rd, pipe_wd = None, None
+        # Always capture stderr through a pipe and drain it in a dedicated
+        # thread. ffmpeg (especially with loudnorm) can be very chatty; if its
+        # stderr pipe is never read, the OS buffer fills up and ffmpeg blocks
+        # mid-stream - the classic "long audio freezes the bot" deadlock.
+        self.last_ffmpeg_err = ""
+        self._ffmpeg_stderr_lines.clear()
+        self.thread = sp.Popen(command, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=self.pcm_buffer_size)
+        stderr_thread = threading.Thread(
+            target=self._drain_ffmpeg_stderr, name="ffmpeg-stderr", args=(self.thread,))
+        stderr_thread.daemon = True
+        stderr_thread.start()
 
-        self.thread = sp.Popen(command, stdout=sp.PIPE, stderr=pipe_wd, bufsize=self.pcm_buffer_size)
+    def _drain_ffmpeg_stderr(self, proc):
+        # Continuously read ffmpeg's stderr so its pipe can never fill up and
+        # block the process. Keep the last few lines around for error reporting.
+        try:
+            for raw_line in iter(proc.stderr.readline, b''):
+                line = raw_line.decode('utf-8', 'replace').rstrip()
+                if not line:
+                    continue
+                self._ffmpeg_stderr_lines.append(line)
+                self.last_ffmpeg_err = "\n".join(self._ffmpeg_stderr_lines)
+                if self.redirect_ffmpeg_log:
+                    self.log.debug("ffmpeg: " + line)
+        except Exception:
+            pass
+        finally:
+            try:
+                proc.stderr.close()
+            except Exception:
+                pass
 
     def async_download_next(self):
         # Function start if the next music isn't ready
@@ -468,11 +526,26 @@ class MumbleBot:
                 var.cache.free_and_delete(next.id)
 
     def async_download(self, item):
+        # Guard against the same item being downloaded twice concurrently:
+        # otherwise a second call would spawn another progress-reporter thread
+        # and every download message would appear twice in chat.
+        with self._download_lock:
+            if item.id in self._active_downloads:
+                self.log.debug("bot: download already running for %s, not starting another", item.id[:7])
+                return None
+            self._active_downloads.add(item.id)
+
         th = threading.Thread(
             target=self._download, name="Prepare-" + item.id[:7], args=(item,))
         self.log.info(f"bot: start preparing item in thread: {item.format_debug_string()}")
         th.daemon = True
         th.start()
+        # Announce progress in chat for downloads slow enough to matter.
+        reporter = threading.Thread(
+            target=self._download_progress_reporter,
+            name="Progress-" + item.id[:7], args=(item,))
+        reporter.daemon = True
+        reporter.start()
         return th
 
     def start_download(self, item):
@@ -483,25 +556,86 @@ class MumbleBot:
                 tr('download_in_progress', item=item.format_title()))
 
     def _download(self, item):
-        ver = item.version
         try:
-            item.validate()
-            if item.is_ready():
-                return True
-        except ValidationFailedError as e:
-            self.send_channel_msg(e.msg)
-            var.playlist.remove_by_id(item.id)
-            var.cache.free_and_delete(item.id)
-            return False
+            ver = item.version
+            try:
+                item.validate()
+                if item.is_ready():
+                    return True
+            except ValidationFailedError as e:
+                self.send_channel_msg(e.msg)
+                var.playlist.remove_by_id(item.id)
+                var.cache.free_and_delete(item.id)
+                return False
 
+            try:
+                item.prepare()
+                if item.version > ver:
+                    var.playlist.version += 1
+                return True
+            except PreparationFailedError as e:
+                self.send_channel_msg(e.msg)
+                return False
+        finally:
+            with self._download_lock:
+                self._active_downloads.discard(item.id)
+
+    def _download_progress_reporter(self, wrapper):
+        # Announce download progress in chat, but only for downloads slow
+        # enough to matter (e.g. a multi-hour video). Short downloads finish
+        # within the grace period and produce no messages at all.
+        grace = 25          # seconds of silence before the first message
+        poll = 4
+        min_gap = 20        # minimum seconds between progress messages
+        max_wait = 7200     # safety cap
+
+        start = time.time()
         try:
-            item.prepare()
-            if item.version > ver:
-                var.playlist.version += 1
-            return True
-        except PreparationFailedError as e:
-            self.send_channel_msg(e.msg)
-            return False
+            item = wrapper.item()
+        except Exception:
+            return
+        if not hasattr(item, 'progress'):
+            return          # not a downloadable URL item
+
+        reported_any = False
+        announced_unknown = False
+        last_msg_time = 0.0
+        next_milestone = 0.25
+
+        while not self.exit and time.time() - start < max_wait:
+            try:
+                if item.is_ready() or item.is_failed():
+                    break
+            except Exception:
+                break
+
+            now = time.time()
+            if now - start >= grace and getattr(item, 'downloading', False):
+                progress = getattr(item, 'progress', 0.0) or 0.0
+                title = getattr(item, 'title', '') or getattr(item, 'url', '') or '...'
+                if progress <= 0.0:
+                    if not announced_unknown and now - last_msg_time >= min_gap:
+                        self.send_channel_msg(tr('download_progress_start', item=title))
+                        announced_unknown = True
+                        reported_any = True
+                        last_msg_time = now
+                elif progress + 1e-6 >= next_milestone and now - last_msg_time >= min_gap:
+                    self.send_channel_msg(tr('download_progress', item=title,
+                                             percent=int(progress * 100)))
+                    reported_any = True
+                    last_msg_time = now
+                    while next_milestone <= progress:
+                        next_milestone += 0.25
+            time.sleep(poll)
+
+        if reported_any:
+            try:
+                finished = item.is_ready()
+            except Exception:
+                finished = False
+            if finished:
+                title = getattr(item, 'title', '') or getattr(item, 'url', '') or '...'
+                self.send_channel_msg(tr('download_finished', item=title))
 
     # =======================
     #          Loop
@@ -510,107 +644,26 @@ class MumbleBot:
     # Main loop of the Bot
     def loop(self):
         while not self.exit and self.mumble.is_alive():
-
-            while self.thread and self.mumble.sound_output.get_buffer_size() > 0.5 and not self.exit:
-                # If the buffer isn't empty, I cannot send new music part, so I wait
-                self._loop_status = f'Wait for buffer {self.mumble.sound_output.get_buffer_size():.3f}'
-                time.sleep(0.01)
-
-            raw_music = None
-            if self.thread:
-                # I get raw from ffmpeg thread
-                # move playhead forward
-                self._loop_status = 'Reading raw'
-                if self.song_start_at == -1:
-                    self.song_start_at = time.time() - self.playhead
-                self.playhead = time.time() - self.song_start_at
-
-                raw_music = self.thread.stdout.read(self.pcm_buffer_size)
-                self.read_pcm_size += len(raw_music)
-
-                if self.redirect_ffmpeg_log:
+            self.last_loop_at = time.time()
+            self._write_heartbeat()
+            try:
+                self._loop_iteration()
+            except Exception:
+                # A failure while playing one item must never take the whole bot
+                # down. Log it, drop the current ffmpeg process and skip ahead.
+                self.log.exception("bot: unexpected error in playback loop; skipping current item")
+                if self.thread:
                     try:
-                        self.last_ffmpeg_err = self.thread_stderr.readline()
-                        if self.last_ffmpeg_err:
-                            self.log.debug("ffmpeg: " + self.last_ffmpeg_err.strip("\n"))
-                    except:
-                        pass
-
-                if raw_music:
-                    # Adjust the volume and send it to mumble
-                    self.volume_cycle()
-
-                    if not self.on_interrupting and len(raw_music) == self.pcm_buffer_size:
-                        self.mumble.sound_output.add_sound(
-                            audioop.mul(raw_music, 2, self.volume_helper.real_volume))
-                    elif self.read_pcm_size == 0:
-                        self.mumble.sound_output.add_sound(
-                            audioop.mul(self._fadeout(raw_music, self.stereo, fadein=True), 2, self.volume_helper.real_volume))
-                    elif self.on_interrupting or len(raw_music) < self.pcm_buffer_size:
-                        self.mumble.sound_output.add_sound(
-                            audioop.mul(self._fadeout(raw_music, self.stereo, fadein=False), 2, self.volume_helper.real_volume))
                         self.thread.kill()
-                        self.thread = None
-                        time.sleep(0.1)
-                        self.on_interrupting = False
-                else:
-                    time.sleep(0.1)
-            else:
+                    except Exception:
+                        pass
+                    self.thread = None
+                self.read_pcm_size = 0
+                self.wait_for_ready = False
+                # Don't advance the playlist here: with thread=None and
+                # wait_for_ready=False, the next normal iteration calls
+                # playlist.next() exactly once, skipping the offending item.
                 time.sleep(0.1)
-
-            if not self.is_pause and not raw_music:
-                self.thread = None
-                # bot is not paused, but ffmpeg thread has gone.
-                # indicate that last song has finished, or the bot just resumed from pause, or something is wrong.
-                if self.read_pcm_size < self.pcm_buffer_size \
-                        and var.playlist.current_index != -1 \
-                        and self.last_ffmpeg_err:
-                    current = var.playlist.current_item()
-                    self.log.error("bot: cannot play music %s", current.format_debug_string())
-                    self.log.error("bot: with ffmpeg error: %s", self.last_ffmpeg_err)
-                    self.last_ffmpeg_err = ""
-
-                    self.send_channel_msg(tr('unable_play', item=current.format_title()))
-                    var.playlist.remove_by_id(current.id)
-                    var.cache.free_and_delete(current.id)
-
-                # move to the next song.
-                if not self.wait_for_ready:  # if wait_for_ready flag is not true, move to the next song.
-                    if var.playlist.next():
-                        current = var.playlist.current_item()
-                        self.log.debug(f"bot: next into the song: {current.format_debug_string()}")
-                        try:
-                            self.start_download(current)
-                            self.wait_for_ready = True
-
-                            self.song_start_at = -1
-                            self.playhead = 0
-
-                        except ValidationFailedError as e:
-                            self.send_channel_msg(e.msg)
-                            var.playlist.remove_by_id(current.id)
-                            var.cache.free_and_delete(current.id)
-                    else:
-                        self._loop_status = 'Empty queue'
-                else:
-                    # if wait_for_ready flag is true, means the pointer is already
-                    # pointing to target song. start playing
-                    current = var.playlist.current_item()
-                    if current:
-                        if current.is_ready():
-                            self.wait_for_ready = False
-                            self.read_pcm_size = 0
-
-                            self.launch_music(current, self.playhead)
-                            self.last_volume_cycle_time = time.time()
-                            self.async_download_next()
-                        elif current.is_failed():
-                            var.playlist.remove_by_id(current.id)
-                            self.wait_for_ready = False
-                        else:
-                            self._loop_status = 'Wait for the next item to be ready'
-                    else:
-                        self.wait_for_ready = False
 
         while self.mumble.sound_output.get_buffer_size() > 0 and self.mumble.is_alive():
             # Empty the buffer before exit
@@ -623,6 +676,141 @@ class MumbleBot:
                     and var.config.get("bot", "save_music_library"):
                 self.log.info("bot: save playlist into database")
                 var.playlist.save()
+
+    def _write_heartbeat(self):
+        # Touch a heartbeat file every few seconds so an external healthcheck
+        # (e.g. Docker) can confirm the main loop is still alive.
+        now = time.time()
+        if now - self._last_heartbeat_write < 5:
+            return
+        self._last_heartbeat_write = now
+        try:
+            with open(self.heartbeat_file, "w") as f:
+                f.write(str(now))
+        except Exception:
+            pass
+
+    def _loop_iteration(self):
+        while self.thread and self.mumble.sound_output.get_buffer_size() > 0.5 and not self.exit:
+            # If the buffer isn't empty, I cannot send new music part, so I wait
+            self._loop_status = f'Wait for buffer {self.mumble.sound_output.get_buffer_size():.3f}'
+            time.sleep(0.01)
+
+        raw_music = None
+        if self.thread:
+            # I get raw from ffmpeg thread
+            # move playhead forward
+            self._loop_status = 'Reading raw'
+            if self.song_start_at == -1:
+                self.song_start_at = time.time() - self.playhead
+            self.playhead = time.time() - self.song_start_at
+
+            raw_music = self.thread.stdout.read(self.pcm_buffer_size)
+            # Capture whether this is the very first chunk of the song *before*
+            # bumping the counter. Otherwise read_pcm_size is already > 0 by the
+            # time the fade-in test runs, so the fade-in branch is dead code.
+            is_first_chunk = self.read_pcm_size == 0
+            self.read_pcm_size += len(raw_music)
+
+            if raw_music:
+                # Adjust the volume and send it to mumble
+                self.volume_cycle()
+
+                if is_first_chunk and not self.on_interrupting \
+                        and len(raw_music) == self.pcm_buffer_size:
+                    # First full chunk of a freshly started song: fade in so the
+                    # attack doesn't begin on a hard discontinuity (click/pop).
+                    # Must be tested before the normal full-chunk branch below,
+                    # which would otherwise swallow it.
+                    self.mumble.sound_output.add_sound(
+                        audioop.mul(self._fadeout(raw_music, self.stereo, fadein=True), 2, self.volume_helper.real_volume))
+                elif not self.on_interrupting and len(raw_music) == self.pcm_buffer_size:
+                    self.mumble.sound_output.add_sound(
+                        audioop.mul(raw_music, 2, self.volume_helper.real_volume))
+                elif self.on_interrupting or len(raw_music) < self.pcm_buffer_size:
+                    self.mumble.sound_output.add_sound(
+                        audioop.mul(self._fadeout(raw_music, self.stereo, fadein=False), 2, self.volume_helper.real_volume))
+                    self.thread.kill()
+                    self.thread = None
+                    time.sleep(0.1)
+                    self.on_interrupting = False
+            else:
+                time.sleep(0.1)
+        else:
+            time.sleep(0.1)
+
+        if not self.is_pause and not raw_music:
+            # bot is not paused, but the ffmpeg thread produced no audio: the
+            # song finished, the bot just resumed from pause, or ffmpeg died.
+            ffmpeg_rc = None
+            if self.thread:
+                try:
+                    ffmpeg_rc = self.thread.wait(timeout=1)
+                except Exception:
+                    # Still running (e.g. an interrupt that didn't go through the
+                    # fadeout branch). We force-kill it ourselves, so this is not
+                    # a decode failure - leave ffmpeg_rc as None so it isn't
+                    # mistaken for a bad codec (Windows kill() returns 1, not -9).
+                    try:
+                        self.thread.kill()
+                    except Exception:
+                        pass
+            self.thread = None
+            self.on_interrupting = False
+
+            # A non-zero ffmpeg exit code that we didn't cause ourselves
+            # (SIGKILL=-9 / SIGTERM=-15) means the track failed to decode - an
+            # unsupported codec, or a corrupt / truncated file.
+            if ffmpeg_rc is not None and ffmpeg_rc not in (0, -9, -15) \
+                    and var.playlist.current_index != -1:
+                current = var.playlist.current_item()
+                if current:
+                    self.log.error("bot: cannot play music %s (ffmpeg exit %s)",
+                                   current.format_debug_string(), ffmpeg_rc)
+                    if self.last_ffmpeg_err:
+                        self.log.error("bot: ffmpeg said: %s", self.last_ffmpeg_err)
+                    self.send_channel_msg(tr('unable_play', item=current.format_title()))
+                    var.playlist.remove_by_id(current.id)
+                    var.cache.free_and_delete(current.id)
+            self.last_ffmpeg_err = ""
+
+            # move to the next song.
+            if not self.wait_for_ready:  # if wait_for_ready flag is not true, move to the next song.
+                if var.playlist.next():
+                    current = var.playlist.current_item()
+                    self.log.debug(f"bot: next into the song: {current.format_debug_string()}")
+                    try:
+                        self.start_download(current)
+                        self.wait_for_ready = True
+
+                        self.song_start_at = -1
+                        self.playhead = 0
+
+                    except ValidationFailedError as e:
+                        self.send_channel_msg(e.msg)
+                        var.playlist.remove_by_id(current.id)
+                        var.cache.free_and_delete(current.id)
+                else:
+                    self._loop_status = 'Empty queue'
+            else:
+                # if wait_for_ready flag is true, means the pointer is already
+                # pointing to target song. start playing
+                current = var.playlist.current_item()
+                if current:
+                    if current.is_ready():
+                        self.wait_for_ready = False
+                        self.read_pcm_size = 0
+
+                        self.launch_music(current, self.playhead)
+                        self.last_volume_cycle_time = time.time()
+                        self.async_download_next()
+                    elif current.is_failed():
+                        var.playlist.remove_by_id(current.id)
+                        self.wait_for_ready = False
+                    else:
+                        self._loop_status = 'Wait for the next item to be ready'
+                else:
+                    self.wait_for_ready = False
 
     def volume_cycle(self):
         delta = time.time() - self.last_volume_cycle_time
@@ -653,13 +841,27 @@ class MumbleBot:
                       + '+' * int((rms - self.ducking_threshold) / 200), end='\r')
 
         if rms > self.ducking_threshold:
-            if self.on_ducking is False:
-                self.log.debug("bot: ducking triggered")
-                self.on_ducking = True
-            self.ducking_release = time.time() + 1  # ducking release after 1s
+            now = time.time()
+            # A gap longer than the release window means this is the start
+            # of a fresh burst of noise.
+            if not self.on_ducking and now > self.ducking_release:
+                self.ducking_loud_since = now
+            self.ducking_release = now + 1  # ducking release after 1s
+
+            # Only duck once the noise has lasted at least ducking_delay
+            # seconds, so brief background noises don't dip the music.
+            if now - self.ducking_loud_since >= self.ducking_delay:
+                if self.on_ducking is False:
+                    self.log.debug("bot: ducking triggered")
+                    self.on_ducking = True
 
     def _fadeout(self, _pcm_data, stereo=False, fadein=False):
         pcm_data = bytearray(_pcm_data)
+        # Drop any trailing bytes that don't form a complete sample frame
+        # (4 bytes in stereo, 2 in mono) so the struct.unpack calls below can
+        # never read past the end of a partial final buffer and raise.
+        frame = 4 if stereo else 2
+        pcm_data = pcm_data[:len(pcm_data) - (len(pcm_data) % frame)]
         if stereo:
             if not fadein:
                 mask = [math.exp(-x / 60) for x in range(0, int(len(pcm_data) / 4))]
@@ -681,7 +883,11 @@ class MumbleBot:
                 pcm_data[2 * i:2 * i + 2] = struct.pack("<h",
                                                         round(struct.unpack("<h", pcm_data[2 * i:2 * i + 2])[0] * mask[i]))
 
-        return bytes(pcm_data) + bytes(len(pcm_data))
+        # Return exactly the faded data. The old upstream code appended
+        # bytes(len(pcm_data)) - an equal-length run of zero bytes (silence) -
+        # which doubled every faded chunk and injected a ~10 ms silent gap at
+        # each song start / fade edge.
+        return bytes(pcm_data)
 
     # =======================
     #      Play Control
@@ -961,6 +1167,42 @@ if __name__ == '__main__':
         tt.daemon = True
         bot_logger.info('Starting web interface on {}:{}'.format(wi_addr, wi_port))
         tt.start()
+
+    # ============================
+    #   Crash safety / watchdog
+    # ============================
+    # In Python an unhandled exception in a worker thread silently kills only
+    # that thread, leaving a half-dead "zombie" bot that no restart policy can
+    # detect. Turn such failures into a loud process exit so the supervisor
+    # (systemd / Docker restart policy) can bring a fresh bot back.
+    if hasattr(threading, "excepthook"):
+        def _thread_excepthook(args):
+            if args.exc_type is SystemExit:
+                return
+            bot_logger.critical(
+                "bot: unhandled exception in thread %s, exiting for restart",
+                args.thread.name if args.thread else "?",
+                exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+            os._exit(1)
+        threading.excepthook = _thread_excepthook
+
+    # Watchdog: if the main playback loop stops making progress (e.g. a stuck
+    # ffmpeg read), force an exit so the supervisor restarts a fresh process.
+    # Set [bot] watchdog_timeout = 0 to disable.
+    watchdog_timeout = var.config.getint("bot", "watchdog_timeout", fallback=0)
+    if watchdog_timeout > 0:
+        def _watchdog():
+            while not var.bot.exit:
+                time.sleep(min(15, watchdog_timeout))
+                if var.bot.exit:
+                    return
+                stalled = time.time() - var.bot.last_loop_at
+                if stalled > watchdog_timeout:
+                    bot_logger.critical(
+                        "bot: playback loop stalled for %.0fs (> %ds), exiting for restart",
+                        stalled, watchdog_timeout)
+                    os._exit(1)
+        threading.Thread(target=_watchdog, name="Watchdog", daemon=True).start()
 
     # Start the main loop.
     var.bot.loop()
