@@ -1,0 +1,39 @@
+# ============================================================================
+# botamusique —— 每日自动更新 yt-dlp / spotdl 的 systemd service 单元
+# ============================================================================
+#
+# 用途:
+#   Bilibili / YouTube 等站点经常改版,导致旧版本 yt-dlp / spotdl 无法解析或
+#   下载音频。本单元定期把 venv 内的 yt-dlp 与 spotdl 升级到最新版,
+#   并重启 botamusique 主服务使新版本生效。
+#
+# 说明:
+#   - 本单元为 Type=oneshot(执行一次即结束),由配套的
+#     botamusique-ytdlp-update.timer 定时触发,通常不需要单独 enable。
+#   - 以 root 运行:升级 venv 内的包并能执行 systemctl restart 重启主服务。
+#
+# 安装步骤(本 .service 与 .timer 需一起复制):
+#   sudo cp deploy/botamusique-ytdlp-update.service /etc/systemd/system/
+#   sudo cp deploy/botamusique-ytdlp-update.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   # 启用并立即启动定时器(见 .timer 文件注释)
+#   sudo systemctl enable --now botamusique-ytdlp-update.timer
+#
+# 手动触发一次更新(用于测试):
+#   sudo systemctl start botamusique-ytdlp-update.service
+# ============================================================================
+
+[Unit]
+Description=Update yt-dlp and spotdl for botamusique, then restart the bot
+# 升级需要联网下载,等待网络可用后再执行。
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 需要 root 权限:既要写入 venv,也要重启 botamusique 服务。
+User=root
+# 第一条:升级虚拟环境内的 yt-dlp 与 spotdl 到最新版。
+ExecStart=/opt/botamusique/venv/bin/pip install --upgrade yt-dlp spotdl
+# 第二条:重启主服务,使更新后的版本生效。
+ExecStart=/bin/systemctl restart botamusique
