@@ -58,6 +58,9 @@ class URLItem(BaseItem):
             self.thumbnail = from_dict['thumbnail']
 
         self.downloading = False
+        # Fraction in [0.0, 1.0] of the current download, updated by the
+        # yt-dlp progress hook so other threads can report progress.
+        self.progress = 0.0
         self.type = "url"
 
     def uri(self):
@@ -163,6 +166,7 @@ class URLItem(BaseItem):
         util.clear_tmp_folder(var.tmp_folder, var.config.getint('bot', 'tmp_folder_max_size'))
 
         self.downloading = True
+        self.progress = 0.0
         base_path = var.tmp_folder + self.id
         save_path = base_path
 
@@ -177,6 +181,7 @@ class URLItem(BaseItem):
             'writethumbnail': True,
             'updatetime': False,
             'verbose': var.config.getboolean('debug', 'youtube_dl'),
+            'progress_hooks': [self._ydl_progress_hook],
             'postprocessors': [{
                 'key': 'FFmpegThumbnailsConvertor',
                 'format': 'jpg',
@@ -221,6 +226,20 @@ class URLItem(BaseItem):
                 self.ready = "failed"
                 self.downloading = False
                 raise PreparationFailedError(tr('unable_download', item=self.format_title()))
+
+    def _ydl_progress_hook(self, d):
+        # Called frequently by yt-dlp while downloading; keep it cheap.
+        status = d.get('status')
+        if status == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            done = d.get('downloaded_bytes', 0)
+            if total:
+                try:
+                    self.progress = max(0.0, min(1.0, done / total))
+                except (TypeError, ZeroDivisionError):
+                    pass
+        elif status == 'finished':
+            self.progress = 1.0
 
     def _read_thumbnail_from_file(self, path_thumbnail):
         if os.path.isfile(path_thumbnail):
