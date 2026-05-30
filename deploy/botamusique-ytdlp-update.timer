@@ -1,0 +1,27 @@
+# ============================================================================
+# botamusique —— 每日更新 yt-dlp / spotdl 的 systemd timer 单元
+# ============================================================================
+#
+# 用途:
+#   定时触发 botamusique-ytdlp-update.service,实现每天自动更新
+#   yt-dlp 与 spotdl(并重启机器人主服务)。
+#
+# 启用方法(需先复制 .service 与本 .timer 到 /etc/systemd/system/):
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now botamusique-ytdlp-update.timer
+#
+# 查看定时器状态与下次触发时间:
+#   sudo systemctl list-timers botamusique-ytdlp-update.timer
+# ============================================================================
+
+[Unit]
+Description=Daily timer to update yt-dlp/spotdl for botamusique
+
+[Timer]
+# 每天触发一次(默认 00:00,可按需改为 OnCalendar=*-*-* 04:00:00 等)。
+OnCalendar=daily
+# 若触发时机器处于关机/休眠状态,开机后会补跑一次错过的任务。
+Persistent=true
+
+[Install]
+WantedBy=timers.target

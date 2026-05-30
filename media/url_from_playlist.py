@@ -40,14 +40,22 @@ def get_playlist_info(url, start_index=0, user=""):
                 #     return items
 
                 playlist_title = info['title']
+
+                # Flat-extracted entries may carry only a bare video id. Pick
+                # the right base URL depending on where the playlist comes from.
+                if 'bilibili.com' in url.lower() or 'b23.tv' in url.lower():
+                    entry_url_prefix = "https://www.bilibili.com/video/"
+                else:
+                    entry_url_prefix = "https://www.youtube.com/watch?v="
+
                 for j in range(start_index, min(len(info['entries']),
                                                 start_index + var.config.getint('bot', 'max_track_playlist'))):
                     # Unknow String if No title into the json
                     title = info['entries'][j]['title'] if 'title' in info['entries'][j] else "Unknown Title"
-                    # Add youtube url if the url in the json isn't a full url
+                    # Add a base url if the url in the json isn't a full url
                     item_url = info['entries'][j]['url'] if info['entries'][j]['url'][0:4] == 'http' \
-                        else "https://www.youtube.com/watch?v=" + info['entries'][j]['url']
-                    print(info['entries'][j])
+                        else entry_url_prefix + info['entries'][j]['url']
+                    log.debug("playlist entry: %s", info['entries'][j])
 
                     music = {
                         "type": "url_from_playlist",
@@ -65,6 +73,9 @@ def get_playlist_info(url, start_index=0, user=""):
                 continue
 
             return items
+    # Every attempt failed (network error, 412, malformed data): return an
+    # empty list so the caller's `len(...)` doesn't blow up on None.
+    return []
 
 
 def playlist_url_item_builder(**kwargs):

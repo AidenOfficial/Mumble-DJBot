@@ -115,6 +115,15 @@ music_folder/
 tmp/
 
 *.db
+*.sqlite
+*.sqlite3
+
+# Runtime data, caches and secrets (Docker / NAS deploy layout)
+data/
+db.ini
+cookies/
+*cookies*.txt
+spotdl_cache/
 
 templates/*.html
 

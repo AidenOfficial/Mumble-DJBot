@@ -1,0 +1,49 @@
+# ============================================================================
+# botamusique Mumble 音乐机器人 —— systemd service 单元文件
+# ============================================================================
+#
+# 用途:让 botamusique(含 Bilibili/Spotify 扩展)作为系统服务长期运行,
+#       并在崩溃后自动重启、随系统开机自启。
+#
+# 约定的部署环境:
+#   - 安装路径   : /opt/botamusique
+#   - 虚拟环境   : /opt/botamusique/venv
+#   - 运行用户   : botamusique(专用非特权用户)
+#
+# 安装步骤:
+#   1. 先创建专用用户(若尚未创建):
+#        sudo useradd --system --home /opt/botamusique --shell /usr/sbin/nologin botamusique
+#        sudo chown -R botamusique:botamusique /opt/botamusique
+#   2. 复制本文件到 systemd 目录:
+#        sudo cp deploy/botamusique.service /etc/systemd/system/
+#   3. 重新加载 systemd 配置并启用 + 启动服务:
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now botamusique
+#   4. 查看运行状态与日志:
+#        sudo systemctl status botamusique
+#        sudo journalctl -u botamusique -f
+# ============================================================================
+
+[Unit]
+Description=botamusique Mumble music bot (Bilibili/Spotify enabled)
+# 等待网络真正可用后再启动,避免开机时连不上 Mumble 服务器。
+After=network-online.target
+Wants=network-online.target
+# 限制崩溃重启风暴:300 秒内最多重启 5 次,超出后停止(systemctl reset-failed 可恢复)。
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# 以专用非特权用户运行,降低安全风险。
+User=botamusique
+# 工作目录设为安装路径,使相对路径(如 configuration.ini)能正确解析。
+WorkingDirectory=/opt/botamusique
+# 使用虚拟环境内的 Python 启动机器人主程序。
+ExecStart=/opt/botamusique/venv/bin/python3 mumbleBot.py --config configuration.ini
+# 自动重启:断线 / 连接失败时进程会以 0 退出,on-failure 不会触发,故用 always。
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

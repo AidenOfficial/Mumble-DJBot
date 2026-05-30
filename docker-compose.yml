@@ -1,0 +1,48 @@
+# Mumble 音乐机器人 — 绿联 NAS / Docker 部署
+# 完整使用说明见 deploy/DOCKER.md
+services:
+  botamusique:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mumble-music:latest
+    container_name: mumble-music
+    restart: unless-stopped
+    init: true
+    # 健康检查:90 秒内主循环没刷新心跳文件就判定 unhealthy。
+    # (容器卡死时 bot 内置看门狗会主动退出,由 restart 策略拉起;
+    #  若想让 unhealthy 也自动重启,可再挂一个 willfarrell/autoheal 容器。)
+    healthcheck:
+      test: ["CMD", "venv/bin/python", "-c", "import os,sys,time; p=os.environ.get('BAM_HEARTBEAT','/botamusique/data/.heartbeat'); sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<90 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    environment:
+      # 每次容器启动时把 yt-dlp / spotdl 升级到最新版(B 站 / YouTube 经常改版)。
+      BAM_UPDATE_ON_START: "1"
+      # 把状态数据库放进挂载目录,容器删除重建也不丢失。
+      BAM_DB: /botamusique/data/db.ini
+      BAM_MUSIC_DB: /botamusique/data/music.db
+      # 心跳文件:主循环每隔几秒刷新它,healthcheck 据此判断机器人是否还活着。
+      BAM_HEARTBEAT: /botamusique/data/.heartbeat
+    volumes:
+      # 配置文件:执行 up 之前必须先在宿主机创建好这个文件,
+      # 否则 Docker 会把它当成目录创建,导致机器人读不到配置。
+      - ./configuration.ini:/botamusique/configuration.ini
+      # 机器人状态数据库(播放设置、音乐库索引)。
+      - ./data:/botamusique/data
+      # 本地音乐文件:把歌曲文件放进宿主机的 music_folder/ 即可。
+      - ./music_folder:/botamusique/music_folder
+      # Spotify(spotdl)下载缓存。
+      - ./spotdl_cache:/botamusique/spotdl_cache
+      # 可选:B 站大会员 / YouTube 登录 cookies(Netscape 格式),
+      # 需要时取消下面这行的注释。
+      # - ./cookies:/botamusique/cookies
+    # 机器人是"客户端",主动连出到 Mumble 服务器,无需映射端口。
+    # 以后启用 Web 界面时再加: ports: ["8181:8181"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -10,6 +10,9 @@ import sys
 import variables as var
 import zipfile
 import re
+from urllib.parse import urlparse, urljoin
+import ipaddress
+import socket
 import subprocess as sp
 import logging
 from importlib import reload
@@ -121,7 +124,12 @@ def check_update(current_version):
     global log
     log.debug("update: checking for updates...")
     new_version = new_release_version(var.config.get('bot', 'target_version'))
-    if version.parse(new_version) > version.parse(current_version):
+    try:
+        update_available = version.parse(new_version) > version.parse(current_version)
+    except version.InvalidVersion:
+        log.debug("update: version string not comparable, skipping update check.")
+        return None, None
+    if update_available:
         changelog = fetch_changelog()
         log.info(f"update: new version {new_version} found, current installed version {current_version}.")
         log.info(f"update: changelog: {changelog}")
@@ -303,7 +311,7 @@ class Dir(object):
 # Parse the html from the message to get the URL
 
 def get_url_from_input(string):
-    string = string.strip()
+    string = string.strip()[:4096]
     if not (string.startswith("http") or string.startswith("HTTP")):
         res = re.search('href="(.+?)"', string, flags=re.IGNORECASE)
         if res:
@@ -311,13 +319,140 @@ def get_url_from_input(string):
         else:
             return ""
 
-    match = re.search("(http|https)://(\S*)?/(\S*)", string, flags=re.IGNORECASE)
+    match = re.search(r"(http|https)://([^/]*)/(\S*)", string, flags=re.IGNORECASE)
     if match:
         url = match[1].lower() + "://" + match[2].lower() + "/" + match[3]
         # https://github.com/mumble-voip/mumble/issues/4999
         return html.unescape(url)
     else:
         return ""
+
+
+def is_public_url(url):
+    # Reject URLs whose host resolves to a private / loopback / link-local /
+    # reserved address, so untrusted chat input can't make the bot probe the
+    # local network (SSRF). Only http(s) URLs are accepted.
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return False
+    if parts.scheme.lower() not in ("http", "https"):
+        return False
+    host = parts.hostname
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError, ValueError):
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
+
+def bv_to_av(bvid):
+    # Convert a Bilibili BV id (e.g. "BV1iCHXzJEdk") into its numeric av id.
+    xor_code = 23442827791579
+    mask_code = 2251799813685247
+    alphabet = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
+    chars = list(bvid)
+    chars[3], chars[9] = chars[9], chars[3]
+    chars[4], chars[7] = chars[7], chars[4]
+    tmp = 0
+    for c in chars[3:]:
+        tmp = tmp * 58 + alphabet.index(c)
+    return (tmp & mask_code) ^ xor_code
+
+
+def _is_bilibili_host(host):
+    host = (host or "").lower()
+    return (host == "bilibili.com" or host.endswith(".bilibili.com")
+            or host in ("b23.tv", "www.b23.tv"))
+
+
+def _resolve_bilibili_redirect(url, max_hops=5):
+    # Follow HTTP redirects one hop at a time, refusing to leave Bilibili.
+    # requests' allow_redirects=True would fetch every hop server-side before we
+    # could check it, letting a crafted b23.tv link reach internal hosts (SSRF).
+    for _ in range(max_hops):
+        try:
+            resp = requests.head(url, allow_redirects=False, timeout=10)
+        except requests.exceptions.RequestException:
+            return None
+        location = resp.headers.get("Location")
+        if not location:
+            return url
+        location = urljoin(url, location)
+        if not _is_bilibili_host(urlparse(location).hostname):
+            return None
+        url = location
+    return url
+
+
+def get_bilibili_url_from_input(string):
+    # Normalize user input into a Bilibili video URL for yt-dlp. Bilibili's
+    # anti-crawl currently answers BV-form video pages with HTTP 412, while the
+    # equivalent av-form URL works - so BV ids are converted to av ids here.
+    # Accepts full bilibili.com / b23.tv links and bare ids, plus an optional
+    # trailing "pN" to select a part of a multi-part video.
+    string = string.strip()[:2048]
+
+    page = None
+    # Single \s (not \s+) keeps this linear - a long run of spaces from chat
+    # would otherwise cause catastrophic regex backtracking (ReDoS).
+    page_match = re.search(r'\sp(\d+)\s*$', string, flags=re.IGNORECASE)
+    if page_match:
+        page = page_match.group(1)
+        string = string[:page_match.start()].strip()
+
+    parsed = get_url_from_input(string)
+
+    # Resolve b23.tv short links to the real bilibili.com URL (SSRF-safe:
+    # redirects are followed one hop at a time and must stay on Bilibili).
+    if parsed and (urlparse(parsed).hostname or "").lower() in ("b23.tv", "www.b23.tv"):
+        parsed = _resolve_bilibili_redirect(parsed) or parsed
+
+    # Only accept Bilibili links (or a bare id when no URL was given) so
+    # look-alikes like "evilbilibili.com" are rejected.
+    if parsed and not _is_bilibili_host(urlparse(parsed).hostname):
+        return ""
+
+    haystack = parsed if parsed else string
+
+    # A multi-part video may carry "?p=N" in the URL - keep that part number.
+    if page is None:
+        p_in_url = re.search(r'[?&]p=(\d+)', haystack)
+        if p_in_url:
+            page = p_in_url.group(1)
+
+    url = ""
+    bv_match = re.search(r'BV[0-9A-Za-z]{10}', haystack)
+    if bv_match:
+        try:
+            url = "https://www.bilibili.com/video/av%d" % bv_to_av(bv_match.group(0))
+        except (ValueError, IndexError):
+            url = "https://www.bilibili.com/video/" + bv_match.group(0)
+    else:
+        av_match = re.search(r'av\d+', haystack, flags=re.IGNORECASE)
+        if av_match:
+            url = "https://www.bilibili.com/video/" + av_match.group(0).lower()
+        elif parsed:
+            # e.g. a bangumi link - pass it through unchanged.
+            url = parsed
+
+    if not url:
+        return ""
+
+    if page and "p=" not in url:
+        url += ("&" if "?" in url else "?") + "p=" + page
+
+    return url
 
 
 def youtube_search(query):
@@ -389,6 +524,7 @@ def parse_time(human):
 
 
 def format_time(seconds):
+    seconds = int(seconds)
     hours = seconds // 3600
     seconds = seconds % 3600
     minutes = seconds // 60
