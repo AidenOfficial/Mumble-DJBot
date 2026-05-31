@@ -1,0 +1,41 @@
+lock-version = "1.0"
+created-by = "pip"
+
+[[packages]]
+name = "opuslib"
+version = "3.0.1"
+
+[packages.sdist]
+name = "opuslib-3.0.1.tar.gz"
+url = "https://files.pythonhosted.org/packages/46/55/826befabb29fd3902bad6d6d7308790894c7ad4d73f051728a0c53d37cd7/opuslib-3.0.1.tar.gz"
+
+[packages.sdist.hashes]
+sha256 = "2cb045e5b03e7fc50dfefe431e3404dddddbd8f5961c10c51e32dfb69a044c97"
+
+[[packages]]
+name = "protobuf"
+version = "7.35.0"
+
+[[packages.wheels]]
+name = "protobuf-7.35.0-cp310-abi3-manylinux2014_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/70/5b/6baf9008817964454055ff3fe65f1de0b5f1e26c80c82f7fb108b7cd4ea3/protobuf-7.35.0-cp310-abi3-manylinux2014_x86_64.whl"
+
+[packages.wheels.hashes]
+sha256 = "6c0f98f10c8a05ea30f8993dfef2de093d27b490fdae78bb60c8343795d55011"
+
+[[packages]]
+name = "pycryptodome"
+version = "3.23.0"
+
+[[packages.wheels]]
+name = "pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/5f/e9/a09476d436d0ff1402ac3867d933c61805ec2326c6ea557aeeac3825604e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+
+[packages.wheels.hashes]
+sha256 = "c8987bd3307a39bc03df5c8e0e3d8be0c4c3518b7f044b0f4c15d1aa78f52575"
+
+[[packages]]
+name = "pymumble"
+
+[packages.directory]
+path = "."
