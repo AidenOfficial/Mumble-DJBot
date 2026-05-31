@@ -7,19 +7,20 @@
 
 [`opus`](https://repology.org/project/opus/packages) is required to send and receive audio.
 
-### Install with `uv` or `pip`
+### Install with `pip`
 
-One of the following:
-- `uv add pymumble`
-- `uv pip install pymumble`
-- `pip install pymumble`
+```sh
+pip install pymumble
+```
 
 ### Install from git
 
 ```sh
 git clone https://codeberg.org/pymumble/pymumble.git
 cd pymumble
-uv sync
+python -m venv venv
+. ./venv/bin/activate
+python -m pip install -e . --group dev
 ```
 
 ## Usage
@@ -50,19 +51,19 @@ The following enhancements are included in pymumble 2.0.0:
 - Implement encrypted UDP audio & pings with AES-OCB2, compatible with the latest Mumble server.
 - Implement unencrypted UDP pings to retrieve extended server info before connecting.
 - Support the latest protocol version: 1.5.735.
-- Use `uv` for packaging and `ruff` for linting.
+- Use `black` for formatting.
 - Send functional version string compatible with the latest Mumble server.
 - Support Python `with` statements.
 
 In order to bring pymumble up to date with modern python development practices, the following breaking changes have been introduced in version 2.0.0:
 
-- Change the import path from `pymumble_py3` to simply `mumble`.
-- Replace callback constants with a class interface. e.g., `Mumble.callbacks.set_callback(PYMUMBLE_CLBK_SOUNDRECEIVED, ...)` is now `Mumble.callbacks.sound_received.set_handler(...)`.
+- Rename the import path from `pymumble_py3` to simply `mumble`.
+- Drop support for legacy audio codecs.
 - Remove `Mumble.set_receive_sound()`, audio support is now enabled by default.
   - To disable audio support and avoid importing `opuslib`, instantiate the `Mumble` object with `Mumble(enable_audio=False)`.
   - To disable audio support after the object has been created set `m = Mumble(); m.enable_audio = False`. This will still import `opuslib`.
-- The `Mumble` class getter/setter functions `set_application_string()`, `set_loop_rate()`, and `get_loop_rate()` have been removed. These parameters can be set in the `Mumble` object initializer and queried and changed by accessing the object's `application` and `loop_rate` public attributes.
-- Drop support for legacy audio codecs.
+- Remove the `Mumble` class getter/setter functions `set_application_string()`, `set_loop_rate()`, and `get_loop_rate()`. These parameters can be set in the `Mumble` object initializer and queried and changed by accessing the object's `application` and `loop_rate` public attributes.
+- Replace callback constants with a class interface. e.g., `Mumble.callbacks.set_callback(PYMUMBLE_CLBK_SOUNDRECEIVED, ...)` is now `Mumble.callbacks.sound_received.set_handler(...)`.
 - Rename all constants to drop the `PYMUMBLE_` prefix, some also renamed for clarity.
 - Rename `SoundOutput` to `SendAudio` and `SoundQueue` to `ReceivedAudioQueue`.
 
@@ -89,7 +90,7 @@ Future releases will focus on:
 - Follow [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/#specification) guidelines for writing commit messages.
 - Document code in the [Sphinx docstring format](https://sphinx-rtd-tutorial.readthedocs.io/en/latest/docstrings.html).
 - Include integration tests for updated or new functionality.
-- Format code with `ruff format` and lint with `ruff lint` before committing.
+- Format code with `black` before committing.
 
 ## Applications using `pymumble`
 
