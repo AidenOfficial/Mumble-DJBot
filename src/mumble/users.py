@@ -1,4 +1,3 @@
-from dataclasses import dataclass, field
 from .constants import TCP_MSG_TYPE
 from .errors import TextTooLongError, ImageTooBigError
 from threading import Lock
@@ -42,9 +41,9 @@ class Users:
         self._users = dict()
 
     def __getitem__(self, key):
-        if type(key) == str:
+        if type(key) is str:
             return {user.name: user for user in self._users.values()}[key]
-        elif type(key) == int:
+        elif type(key) is int:
             return self._users[key]
 
     def by_name(self):
