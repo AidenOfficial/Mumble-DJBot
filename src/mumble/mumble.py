@@ -207,7 +207,7 @@ class MumbleServerInfo(threading.Thread):
                     self._ping_server(server)
                     server.last_ping_sent = time.time()
 
-            (rlist, wlist, xlist) = select.select(sockets, [], sockets, self._loop_rate)
+            rlist, wlist, xlist = select.select(sockets, [], sockets, self._loop_rate)
             for sock in rlist:
                 self._read_udp_message(sock)
             for sock in xlist:
@@ -372,7 +372,7 @@ class MumbleUDP(threading.Thread):
                 self._ping()
                 self._last_ping_sent = time.time()
 
-            (rlist, _, xlist) = select.select(
+            rlist, _, xlist = select.select(
                 [self._socket], [], [self._socket], self._loop_rate
             )
             if self._socket in rlist:
@@ -763,7 +763,7 @@ class Mumble(threading.Thread):
                 if self.send_audio:
                     self.send_audio.send_audio()  # send outgoing audio if available
 
-            (rlist, wlist, xlist) = select.select(
+            rlist, wlist, xlist = select.select(
                 [self.control_socket], [], [self.control_socket], self.loop_rate
             )  # wait for a socket activity
 
@@ -852,7 +852,7 @@ class Mumble(threading.Thread):
             if len(header) < 6:
                 break
 
-            (type, size) = struct.unpack("!HL", header)  # decode header
+            type, size = struct.unpack("!HL", header)  # decode header
 
             if len(self.receive_buffer) < size + 6:  # if not length data, read further
                 break
@@ -901,7 +901,9 @@ class Mumble(threading.Thread):
                 self.ready_lock.release()
                 raise ConnectionRejectedError(mess.reason)
 
-            case TCP_MSG_TYPE.ServerSync:  # this message finishes the connection process
+            case (
+                TCP_MSG_TYPE.ServerSync
+            ):  # this message finishes the connection process
                 self.users.set_myself(mess.session)
                 self.server_max_bandwidth = mess.max_bandwidth
                 self.set_bandwidth(mess.max_bandwidth)

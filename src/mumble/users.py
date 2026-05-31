@@ -122,7 +122,9 @@ class User:
     user_id: int | None = None
     mute: bool = False  #: If the user is muted by admin.
     deaf: bool = False  #: If the user is deafened by admin.
-    suppress: bool = False  #: If the user has been suppressed from talking by a reason other than being muted.
+    suppress: bool = (
+        False  #: If the user has been suppressed from talking by a reason other than being muted.
+    )
     self_mute: bool = False  #: If the user has self muted.
     self_deaf: bool = False  #: If the user has self deafened.
     priority_speaker: bool = False  #: If the user is a priority speaker.

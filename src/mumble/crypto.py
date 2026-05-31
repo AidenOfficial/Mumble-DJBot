@@ -14,7 +14,6 @@ from math import ceil
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
-
 AES_BLOCK_SIZE = 128 // 8  # Number of bytes in a block
 AES_KEY_SIZE_BITS = 128
 AES_KEY_SIZE_BYTES = AES_KEY_SIZE_BITS // 8
