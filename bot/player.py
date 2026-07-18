@@ -19,8 +19,62 @@ class PlayerMixin:
     #   Launch and Download
     # =======================
 
+    def _stream_enabled(self):
+        return var.config.getboolean('bot', 'stream_while_downloading', fallback=False)
+
+    def _stream_playable(self, wrapper):
+        """True if stream-while-downloading is on and enough of the (still
+        downloading) current item is on disk to play from the playhead."""
+        if not self._stream_enabled():
+            return False
+        try:
+            item = wrapper.item()
+        except Exception:
+            return False
+        min_duration = var.config.getint('bot', 'stream_min_duration', fallback=300)
+        if (getattr(item, 'duration', 0) or 0) < min_duration:
+            return False
+        buffer_secs = var.config.getint('bot', 'stream_buffer_seconds', fallback=30)
+        return wrapper.playable_from(self.playhead, buffer_secs)
+
+    def _stream_rewait(self, ffmpeg_rc):
+        """Called when ffmpeg exited while the current item is still
+        downloading (only possible after a streaming launch). Decide whether
+        to keep waiting on this item instead of advancing the playlist.
+
+        A clean exit (rc 0) after producing audio means ffmpeg simply caught
+        up with the download: wait for more data, then relaunch from the
+        playhead. Any other outcome means this container cannot be decoded
+        while growing (e.g. mp4 with a trailing moov atom): flag the item so
+        it waits for the full download instead of retrying forever."""
+        if not self._stream_enabled() or var.playlist.current_index == -1:
+            return False
+        current = var.playlist.current_item()
+        if not current:
+            return False
+        try:
+            item = current.item()
+        except Exception:
+            return False
+        if not getattr(item, 'downloading', False) or ffmpeg_rc in (-9, -15):
+            return False  # not a streaming launch, or killed on purpose
+        if ffmpeg_rc == 0 and self.read_pcm_size > 0:
+            duration = getattr(item, 'duration', 0) or 0
+            if self.playhead >= duration - 2:
+                return False  # played to the (known) end already
+            self.log.info("bot: streaming caught up with the download at "
+                          "%.0fs, waiting for more data" % self.playhead)
+        else:
+            item.no_stream = True
+            self.log.info("bot: streaming attempt failed (ffmpeg exit %s), "
+                          "waiting for the full download" % ffmpeg_rc)
+        # keep the playhead; the wait_for_ready branch relaunches from it
+        self.wait_for_ready = True
+        self.song_start_at = -1
+        return True
+
     def launch_music(self, music_wrapper, start_from=0):
-        assert music_wrapper.is_ready()
+        assert music_wrapper.is_ready() or music_wrapper.playable_from(start_from, 0)
 
         uri = music_wrapper.uri()
 
@@ -338,6 +392,13 @@ class PlayerMixin:
             self.thread = None
             self.on_interrupting = False
 
+            # Stream-while-downloading: if ffmpeg exited while the current
+            # item is still downloading, wait for more data instead of
+            # advancing (or misreading the early EOF as a decode failure).
+            if ffmpeg_rc is not None and self._stream_rewait(ffmpeg_rc):
+                self.last_ffmpeg_err = ""
+                return
+
             # A non-zero ffmpeg exit code that we didn't cause ourselves
             # (SIGKILL=-9 / SIGTERM=-15) means the track failed to decode - an
             # unsupported codec, or a corrupt / truncated file.
@@ -387,6 +448,16 @@ class PlayerMixin:
                     elif current.is_failed():
                         var.playlist.remove_by_id(current.id)
                         self.wait_for_ready = False
+                    elif self._stream_playable(current):
+                        # enough of the download is on disk: start playing
+                        # from the playhead while yt-dlp keeps writing
+                        self.wait_for_ready = False
+                        self.read_pcm_size = 0
+
+                        self.launch_music(current, self.playhead)
+                        self.last_volume_cycle_time = time.time()
+                        # note: no async_download_next() here - the current
+                        # item is still downloading, don't compete with it
                     else:
                         self._loop_status = 'Wait for the next item to be ready'
                 else:
@@ -531,7 +602,8 @@ class PlayerMixin:
 
         music_wrapper = var.playlist.current_item()
 
-        if not music_wrapper or not music_wrapper.id == self.pause_at_id or not music_wrapper.is_ready():
+        if not music_wrapper or not music_wrapper.id == self.pause_at_id or \
+                not (music_wrapper.is_ready() or self._stream_playable(music_wrapper)):
             self.playhead = 0
             return
 

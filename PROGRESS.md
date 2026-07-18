@@ -20,7 +20,15 @@
 - 配置:`cleanup_interval_days`(默认 7,0=关)、`cleanup_keep_days`(默认 7),已写入 configuration.default.ini,注释在 configuration.example.ini。
 - 验证:16 个新单测(tests/test_cleanup.py,注入 clock + 临时目录 + 真 sqlite),全量 36 passed;pyflakes 新文件 0 告警;smoke imports + bili 元数据探测通过。
 
-### A2. 大文件流式播放(边下边播) — TODO
+### A2. 大文件流式播放(边下边播) — DONE(代码+单测;真机端到端待本机复验)
+
+- Spike 结论(容器内用静态 ffmpeg 7.0.2 实测"增长中文件"):webm/opus、mp3、fragmented mp4 都能直接解码增长中文件,到 EOF 以 rc=0 干净退出;`-ss playhead` 重启可无缝续播(60s 源实测 16s 断点续播 +44s 补齐);moov 在尾部的普通 mp4 打不开(rc=183)→ 必须降级等完整下载。
+- 实现方案(复用现有 loop 结构,不引入管道方案):
+  - `media/url.py`:开启流式时 yt-dlp 用 `nopart`(文件在最终路径原地增长);写 `<path>.incomplete` 标记,下载成功删除、失败随 glob 清除;validate 发现"文件存在但标记还在"(崩溃残留的截断文件)就丢弃重下。新增 `playable_from(playhead, buffer_secs)`:按 progress×duration 估算已下秒数,水位=playhead+buffer(文件尾部自动放宽)。
+  - `bot/player.py`:`_stream_playable`(配置开关+时长门槛+水位)在 wait_for_ready 分支触发提前 launch_music(playhead);`_stream_rewait` 处理 ffmpeg 退出:rc=0 且产出过 PCM 且未到曲尾 → 追上下载了,回到等待态攒够 buffer 再从 playhead 续播;rc≠0 或零产出 → 标记 item.no_stream,等完整下载(moov 尾部 mp4 自动降级,不会误删条目);-9/-15(skip/pause)不拦截。resume() 同步支持流式条目。
+  - 清理联动:`.incomplete` 加入 A1 的 PARTIAL_SUFFIXES。
+- 配置(默认关):`stream_while_downloading=False`、`stream_buffer_seconds=30`、`stream_min_duration=300`,注释在 example ini。
+- 验证:19 个新单测(watermark/rewait/降级/skip 路径),全量 55 passed;pyflakes 无新增;smoke imports 通过。**待本机复验**:开启配置后用长 B 站视频实测(harness 断言音频先于下载完成到达),及 Windows 上 nopart 行为。
 
 ### A3. 队列预取(prefetch) — TODO
 

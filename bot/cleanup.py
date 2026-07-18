@@ -42,7 +42,8 @@ DAY_SECONDS = 24 * 3600
 # a file being written right now must survive the sweep.
 MIN_AGE_SECONDS = 3600
 # In-progress download artifacts (yt-dlp and friends).
-PARTIAL_SUFFIXES = ('.part', '.ytdl', '.tmp', '.temp', '.frag', '.download')
+PARTIAL_SUFFIXES = ('.part', '.ytdl', '.tmp', '.temp', '.frag', '.download',
+                    '.incomplete')
 
 _HEX_ID_RE = re.compile(r'^[0-9a-f]{32}$')
 

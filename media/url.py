@@ -61,6 +61,10 @@ class URLItem(BaseItem):
         # Fraction in [0.0, 1.0] of the current download, updated by the
         # yt-dlp progress hook so other threads can report progress.
         self.progress = 0.0
+        # Set by the player when a stream-while-downloading attempt failed
+        # (e.g. a container that cannot be decoded before it is complete);
+        # from then on this item waits for the full download.
+        self.no_stream = False
         self.type = "url"
 
     def uri(self):
@@ -88,8 +92,14 @@ class URLItem(BaseItem):
             #     return False
             #
             if os.path.exists(self.path):
-                self.ready = "yes"
-                return True
+                if os.path.exists(self._incomplete_marker_path()):
+                    # A stream-while-downloading (nopart) download died before
+                    # completing, leaving a truncated file at the final path.
+                    # Discard it and fall through to a fresh validation.
+                    self._discard_incomplete_download()
+                else:
+                    self.ready = "yes"
+                    return True
 
             # Check if this url is banned
             if var.db.has_option('url_ban', self.url):
@@ -162,6 +172,30 @@ class URLItem(BaseItem):
             self.log.error("url: error while fetching info from the URL")
             raise ValidationFailedError(tr('unable_download', item=self.format_title()))
 
+    def _incomplete_marker_path(self):
+        return self.path + ".incomplete"
+
+    def _discard_incomplete_download(self):
+        for f in glob.glob(self.path + "*"):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+    def playable_from(self, playhead, buffer_secs):
+        """True if enough of this item is on disk to start (or continue)
+        playback at `playhead` with `buffer_secs` seconds of safety margin.
+        Used by the player for stream-while-downloading."""
+        if self.ready == 'yes':
+            return True
+        if self.no_stream or not self.downloading or not self.duration:
+            return False
+        if not os.path.exists(self.path):
+            return False
+        downloaded_secs = (self.progress or 0.0) * self.duration
+        # near the end of the file the margin cannot be satisfied anymore
+        return downloaded_secs >= min(self.duration - 1, playhead + buffer_secs)
+
     def _download(self):
         util.clear_tmp_folder(var.tmp_folder, var.config.getint('bot', 'tmp_folder_max_size'))
 
@@ -172,6 +206,18 @@ class URLItem(BaseItem):
 
         # Download only if music is not existed
         self.ready = "preparing"
+
+        # Stream-while-downloading needs the file to grow in place at its
+        # final path (no .part + rename), so ffmpeg can read it while yt-dlp
+        # is still writing. A marker file flags the download as incomplete so
+        # a crash can never leave a truncated file that looks finished.
+        streaming = var.config.getboolean('bot', 'stream_while_downloading',
+                                          fallback=False)
+        if streaming:
+            try:
+                open(base_path + ".incomplete", 'w').close()
+            except OSError:
+                streaming = False
 
         self.log.info("bot: downloading url (%s) %s " % (self.title, self.url))
         ydl_opts = {
@@ -188,6 +234,8 @@ class URLItem(BaseItem):
                 'when': 'before_dl'
             }]
         }
+        if streaming:
+            ydl_opts['nopart'] = True
 
         cookie = var.config.get('youtube_dl', 'cookie_file')
         if cookie:
@@ -212,6 +260,10 @@ class URLItem(BaseItem):
                     self.log.error("bot: download failed with error:\n %s" % error)
 
             if download_succeed:
+                try:
+                    os.remove(base_path + ".incomplete")
+                except OSError:
+                    pass
                 self.path = save_path
                 self.ready = "yes"
                 self.log.info(

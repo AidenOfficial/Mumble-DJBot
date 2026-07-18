@@ -194,6 +194,11 @@ class CachedItemWrapper:
     def is_failed(self):
         return self.item().is_failed()
 
+    def playable_from(self, playhead, buffer_secs):
+        # stream-while-downloading probe; only URL items implement it
+        fn = getattr(self.item(), 'playable_from', None)
+        return fn(playhead, buffer_secs) if fn else False
+
     def format_current_playing(self):
         return self.item().format_current_playing(self.user)
 
