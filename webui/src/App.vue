@@ -4,11 +4,12 @@ import NowPlaying from './components/NowPlaying.vue'
 import QueueList from './components/QueueList.vue'
 import SearchPage from './components/SearchPage.vue'
 import StatsPage from './components/StatsPage.vue'
+import LibraryPage from './components/LibraryPage.vue'
 
 type Theme = 'light' | 'dark' | 'auto'
 const theme = ref<Theme>('auto')
 
-type View = 'home' | 'search' | 'stats'
+type View = 'home' | 'search' | 'library' | 'stats'
 const view = ref<View>('home')
 
 function applyTheme(t: Theme) {
@@ -54,14 +55,14 @@ onMounted(() => {
         </div>
         <nav class="flex gap-1 rounded-full p-1" :style="{ background: 'var(--c-surface-2)' }">
           <button
-            v-for="v in (['home', 'search', 'stats'] as const)"
+            v-for="v in (['home', 'search', 'library', 'stats'] as const)"
             :key="v"
             class="cursor-pointer rounded-full border-0 px-3.5 py-1.5 text-xs font-medium capitalize"
             :style="view === v
               ? { background: 'var(--c-surface)', color: 'var(--c-text)', boxShadow: 'var(--shadow-1)' }
               : { background: 'transparent', color: 'var(--c-text-muted)' }"
             @click="view = v"
-          >{{ v === 'home' ? 'Now Playing' : v === 'search' ? 'Search' : 'Stats' }}</button>
+          >{{ ({ home: 'Now Playing', search: 'Search', library: 'Library', stats: 'Stats' })[v] }}</button>
         </nav>
         <button
           class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-0 text-lg"
@@ -82,6 +83,7 @@ onMounted(() => {
         <QueueList />
       </template>
       <SearchPage v-else-if="view === 'search'" />
+      <LibraryPage v-else-if="view === 'library'" />
       <StatsPage v-else />
     </main>
   </div>

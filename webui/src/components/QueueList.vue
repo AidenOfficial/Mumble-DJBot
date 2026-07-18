@@ -7,6 +7,38 @@ const { status, applyStatus } = useStatus()
 
 const items = ref<QueueItem[]>([])
 const busy = ref(false)
+const dragFrom = ref<number | null>(null)
+const dragOver = ref<number | null>(null)
+
+function onDragStart(i: number, e: DragEvent) {
+  dragFrom.value = i
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(i))
+  }
+}
+
+function onDragOver(i: number, e: DragEvent) {
+  e.preventDefault()
+  dragOver.value = i
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+}
+
+async function onDrop(i: number) {
+  const from = dragFrom.value
+  dragFrom.value = null
+  dragOver.value = null
+  if (from === null || from === i) return
+  // optimistic reorder so the row lands immediately
+  const moved = items.value.splice(from, 1)[0]!
+  items.value.splice(i, 0, moved)
+  await act({ action: 'move', index: from, to: i })
+}
+
+function onDragEnd() {
+  dragFrom.value = null
+  dragOver.value = null
+}
 
 async function reload() {
   try {
@@ -57,11 +89,23 @@ async function act(body: QueueAction) {
       <li
         v-for="(item, i) in items"
         :key="`${item.id}-${i}`"
-        class="group flex items-center gap-3 rounded-xl px-3 py-2"
-        :style="item.is_current
-          ? { background: 'var(--c-accent-soft)' }
-          : { background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }"
+        class="group flex cursor-grab items-center gap-3 rounded-xl px-3 py-2 active:cursor-grabbing"
+        :style="{
+          ...(item.is_current
+            ? { background: 'var(--c-accent-soft)' }
+            : { background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }),
+          ...(dragOver === i && dragFrom !== null && dragFrom !== i
+            ? { outline: '2px solid var(--c-accent)', outlineOffset: '-2px' }
+            : {}),
+          ...(dragFrom === i ? { opacity: 0.4 } : {}),
+        }"
+        draggable="true"
+        @dragstart="onDragStart(i, $event)"
+        @dragover="onDragOver(i, $event)"
+        @drop.prevent="onDrop(i)"
+        @dragend="onDragEnd"
       >
+        <span class="shrink-0 select-none text-xs" :style="{ color: 'var(--c-text-faint)' }" aria-hidden="true">⠿</span>
         <!-- art -->
         <div class="h-10 w-10 shrink-0 overflow-hidden rounded-lg" :style="{ background: 'var(--c-surface-2)' }">
           <img v-if="item.has_thumbnail" :src="thumbnailUrl(item.id)" alt="" class="h-full w-full object-cover" loading="lazy" />

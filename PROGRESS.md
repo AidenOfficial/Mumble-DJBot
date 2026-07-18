@@ -71,19 +71,19 @@
 
 **实施顺序**:B2 后端 status API → webui 脚手架+B1 token 体系 → B2 Now Playing → B5 队列/控制 → B3 搜索 → B4 统计 → 切换 `/` + B6 文档。
 
-### B1. 设计与审美 — DOING
+### B1. 设计与审美 — DONE
 
 - [x] 设计 token 体系(webui/src/style.css):surface/text/accent/feedback/radius/shadow 全部 CSS 自定义属性,浅色默认 + prefers-color-scheme 暗色 + `[data-theme]` 强制覆盖(App 头部有 auto/light/dark 三态切换,localStorage 记忆);`@theme inline` 桥接进 Tailwind 4 实用类。主色 #6d5ef2(暗色 #8577ff),中性色分 bg/surface/surface-2 三层。
 - [x] 截图自查:桌面+移动 × 深浅主题四张,层次/间距/对比度 OK,无 console 错误。
-- [ ] 后续页面沿用此体系,统计图表配色对齐(B4)。
+- [x] 全部页面(Now Playing/Search/Library/Stats)沿用同一 token 体系;统计图表配色过 dataviz 验证。
 
-### B2. Now Playing 主界面 — DOING
+### B2. Now Playing 主界面 — DONE
 
 - [x] 后端:`web_api.py` Blueprint(`create_blueprint(requires_auth)` 注入鉴权,interface.py 注册,挂 `/api/*`):`GET /api/status`(轻量轮询:play/mode/volume/ducking/playhead/queue_length/current 摘要+server_time,不含缩略图)、`GET /api/thumbnail/<id>`(JPEG 字节,Cache-Control 1 天,前端按 id 换歌时取一次)。6 个新单测(Flask test client + fake bot/playlist/cache),全量 71 passed。
 - [x] webui/ 脚手架:Vite 8 + Vue 3.5(`<script setup>` TS)+ Tailwind 4,base=/app/,dev proxy /api→8181,package-lock 锁定;node_modules 入 gitignore,**dist/ 随仓库提交**(无 node 的部署环境直接可用)。
 - [x] Now Playing 雏形(NowPlaying.vue + useStatus.ts):封面(有 thumbnail 按 id 取一次不闪烁,无则渐变占位)、曲名/来源徽标、进度条(rAF 前端平滑推算 + 3s 轮询校准,超时钳到 duration)、队列摘要/暂停标记、错误提示。
 - [x] Flask 挂载:`/app` 302 → `/app/`,`/app/<path>` 走 send_from_directory(requires_auth 保持),旧 `/` 不动。
-- [ ] 播放控制按钮(播放/暂停/跳过/音量)待 B5 controls API 一起接。
+- [x] 播放控制(播放/暂停/跳过/音量/模式)已接入(见 B5)。
 
 ### B3. 统一搜索(YouTube + Bilibili) — DONE
 
@@ -100,13 +100,13 @@
 - 前端 StatsPage.vue:stat tiles、来源占比条(2px 间隙 + 带数值图例,浅色对比度 WARN 按 relief 规则用可见标签补偿)、时段直方图(单色渐进 + title 悬浮)、Most played(镇站之宝徽标)/Top requesters 条形列表、Most skipped 趣味卡。配色过 dataviz 六检(双主题 categorical 验证 PASS)。
 - 验证:9 个新单测(聚合 SQL 注入固定时间戳、skip 只标最新行、空库、埋点只记 fresh start),全量 109 passed;截图桌面暗色+移动浅色过关。
 
-### B5. Dashboard 完整功能 — DOING
+### B5. Dashboard 完整功能 — DONE
 
 - [x] 后端 `POST /api/controls`(pause/resume/skip/stop/clear/mode/volume,语义逐条镜像旧 /post,响应返回最新 status 供前端乐观更新);`GET /api/queue`(全队列摘要+is_current)、`POST /api/queue`(move/top/remove/play/clear;move 带 current_index 修正,remove 镜像旧 delete_music 语义)。17 个新单测(含 move 三种 index 位移、边界 400),全量 88 passed。
 - [x] 前端:Controls.vue(播放/暂停、跳过、音量滑条 150ms 防抖、ducking 徽标、四模式切换 chips)+ QueueList.vue(缩略图/时长、当前曲高亮、▶ 插播 / ⤴ 置顶 / ✕ 删除、Clear all;按 status.version 变化自动刷新 + 10s 兜底轮询);useStatus 重构为模块级单例 store,控制操作直接 applyStatus 响应。
 - [x] 截图自查(桌面暗色 + 移动浅色),harness 点击 Pause 断言 POST 真实到达。
-- [ ] 拖拽排序(后端 move API 已备好,前端拖拽后置)。
-- [ ] 曲库浏览/上传页(复用旧 /library、/upload)。
+- [x] 队列拖拽排序:HTML5 drag(拖柄⠿、目标高亮、乐观重排),drop 调 /api/queue move;Playwright 实测 drag_to 后 POST {action:move,index:3,to:1} 正确。
+- [x] Library 页:关键词防抖筛选 + 类型 chips + 标签下拉(/library/info)、分页,逐条 ⤴ Next / + Queue(走旧 /post add_item_next/bottom,✓/✗ 反馈);上传按钮(multipart /upload,409/成功/失败提示)。截图桌面浅色+移动暗色过关。
 
 ### B6. 发布准备文档 — TODO
 
