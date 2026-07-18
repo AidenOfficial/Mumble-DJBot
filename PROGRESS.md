@@ -37,7 +37,39 @@
 - 配置:`prefetch_count = 2`(1=旧行为),注释在 example ini。
 - 验证:10 个新单测(窗口语义 × 各播放模式、并发上限、ready 跳过、滑动),全量 65 passed;pyflakes 无新增;smoke imports 通过。
 
-### B0. Web 技术方案 — TODO
+### B0. Web 技术方案 — DONE(方案定稿如下)
+
+**既有 API 清单(interface.py,769 行,全部走 `requires_auth`,auth_method 默认 none)**
+
+| 路由 | 方法 | 功能 |
+|---|---|---|
+| `/` | GET | 旧版 index HTML(按语言选模板) |
+| `/playlist` | GET | 队列切片 JSON(range_from/range_to,含 HTML 片段字段) |
+| `/post` | POST | 万能命令端点:add_item_at_once/bottom/next、add_url、add_radio、delete_music(按 index)、play_music(跳转)、move_playhead、delete_item_from_library、add_tag、action=(random/one-shot/repeat/autoplay/rescan/stop/next/pause/resume/clear/volume_up/volume_down/volume_set_value);返回 status() |
+| (无路由) | — | `status()`:ver/current_index/empty/play/mode/volume/playhead,仅作为 /post 响应 |
+| `/library/info` | GET | dirs/tags/upload_enabled/delete_allowed/max_upload_file_size |
+| `/library` | POST | action=query(分页)/add/delete/edit_tags |
+| `/upload` | POST | 上传音频到 music_folder(mimetype 校验、路径穿越防护) |
+| `/download` | GET | 单曲或按条件 zip 下载 |
+
+**痛点**:`/post` 单端点复用 + 表单语义、playlist 响应里混 HTML 片段、无独立 status 轮询端点、无搜索/统计 API、jQuery+webpack4 前端难以演进。
+
+**决策:保留 Flask 做 JSON API + 全新 SPA 前端(不渐进改造)**
+
+- 前端:**Vite 8 + Vue 3.5(`<script setup>` + TS)+ Tailwind CSS 4**,新目录 `webui/`,产物输出 `webui/dist/`,由 Flask 静态托管。容器内已验证 node 22 + npm 可用,依赖锁 package-lock.json。
+- 理由:Vue3 组合式 API 适合这种中等规模仪表盘;Tailwind 4 便于做 design token 体系(B1);Vite 构建快且产物自包含;不渐进改造是因为旧前端(jQuery+webpack4+babel7)升级成本高于重写,且旧 UI 在新 UI 完成前原样保留。
+- 后端:新增 **`web_api.py` Flask Blueprint,挂 `/api/*`**,interface.py 注册之,复用 requires_auth;旧路由一概不动。新端点(纯 JSON,无 HTML 片段):
+  - `GET /api/status`(轻量轮询:play/playhead/duration/volume/mode/当前曲目摘要+缩略图)
+  - `GET /api/queue` + `POST /api/queue/...`(move/remove/top/clear,复用 /post 既有逻辑抽函数)
+  - `POST /api/controls`(pause/resume/skip/mode/volume)
+  - `GET /api/search?q=`(并行 ytsearchN + B 站公开搜索,B3)
+  - `GET /api/stats/*`(B4,含 play_history 埋点)
+  - 曲库/上传沿用旧端点(前端直接调 /library、/upload)
+- 新 UI 挂载:开发期 Flask 挂 **`/app`**(旧 `/` 不动);B5 完成后 `/` 切新 UI、旧界面下线(一次 commit 可回滚)。
+- Docker 构建链:Dockerfile 增加 node 构建 stage 产出 `webui/dist`(不执行部署,仅改 Dockerfile 内容)。
+- 部署边界:仍只监听配置地址;鉴权继续依赖 Cloudflare Access(应用层 auth_method 保持现状)。
+
+**实施顺序**:B2 后端 status API → webui 脚手架+B1 token 体系 → B2 Now Playing → B5 队列/控制 → B3 搜索 → B4 统计 → 切换 `/` + B6 文档。
 
 ### B1. 设计与审美 — TODO
 
