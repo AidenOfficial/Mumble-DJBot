@@ -8,7 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist is committed on purpose: deployments without node serve it via Flask
 dist-ssr
 *.local
 
