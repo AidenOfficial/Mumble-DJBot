@@ -15,6 +15,10 @@ class PlayerMixin:
     """Playback half of MumbleBot: ffmpeg decoding, the send loop,
     download orchestration, volume/ducking and transport control."""
 
+    # Hard cap on concurrent downloads started by the prefetcher, so a long
+    # queue cannot saturate bandwidth or disk.
+    PREFETCH_MAX_CONCURRENT = 2
+
     # =======================
     #   Launch and Download
     # =======================
@@ -158,6 +162,30 @@ class PlayerMixin:
                 self.send_channel_msg(e.msg)
                 var.playlist.remove_by_id(next.id)
                 var.cache.free_and_delete(next.id)
+
+        self._prefetch_upcoming()
+
+    def _prefetch_upcoming(self):
+        """Pre-download items beyond the immediate next one so queue
+        advances don't stall on downloads. The window size comes from
+        prefetch_count; at most PREFETCH_MAX_CONCURRENT downloads run at
+        once (the _active_downloads guard also dedupes against the
+        download the loop itself started)."""
+        count = var.config.getint('bot', 'prefetch_count', fallback=2)
+        if count <= 1:
+            return
+        for wrapper in var.playlist.upcoming_items(count)[1:]:
+            with self._download_lock:
+                if len(self._active_downloads) >= self.PREFETCH_MAX_CONCURRENT:
+                    break
+            try:
+                if not wrapper.is_ready():
+                    self.async_download(wrapper)
+            except ValidationFailedError as e:
+                # same cleanup path async_download_next uses
+                self.send_channel_msg(e.msg)
+                var.playlist.remove_by_id(wrapper.id)
+                var.cache.free_and_delete(wrapper.id)
 
     def async_download(self, item):
         # Guard against the same item being downloaded twice concurrently:

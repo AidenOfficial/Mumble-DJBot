@@ -30,7 +30,12 @@
 - 配置(默认关):`stream_while_downloading=False`、`stream_buffer_seconds=30`、`stream_min_duration=300`,注释在 example ini。
 - 验证:19 个新单测(watermark/rewait/降级/skip 路径),全量 55 passed;pyflakes 无新增;smoke imports 通过。**待本机复验**:开启配置后用长 B 站视频实测(harness 断言音频先于下载完成到达),及 Windows 上 nopart 行为。
 
-### A3. 队列预取(prefetch) — TODO
+### A3. 队列预取(prefetch) — DONE
+
+- `media/playlist.py` 新增 `upcoming_items(count)`(Base 按索引窗口;Oneshot 从 index 1 起;Repeat 环绕不重复;Random/Autoplay 继承),只读不动播放状态。
+- `bot/player.py` `async_download_next()` 末尾调 `_prefetch_upcoming()`:窗口 = 配置 `prefetch_count`(默认 2),跳过第一个(loop 自身已下),并发上限 `PREFETCH_MAX_CONCURRENT=2`(复用 `_active_downloads` 去重);验证失败走既有错误路径(消息+移除+free)。加歌/切歌都会触发,窗口自然滑动。
+- 配置:`prefetch_count = 2`(1=旧行为),注释在 example ini。
+- 验证:10 个新单测(窗口语义 × 各播放模式、并发上限、ready 跳过、滑动),全量 65 passed;pyflakes 无新增;smoke imports 通过。
 
 ### B0. Web 技术方案 — TODO
 

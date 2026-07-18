@@ -176,6 +176,16 @@ class BasePlaylist(list):
 
         return False
 
+    def upcoming_items(self, count):
+        # Peek at up to `count` items that would play after the current one,
+        # in play order, without changing any playlist state. Used by the
+        # player's prefetcher.
+        with self.playlist_lock:
+            if count <= 0:
+                return []
+            start = max(self.current_index + 1, 0)
+            return list(self[start:start + count])
+
     def randomize(self):
         with self.playlist_lock:
             # current_index will lose track after shuffling, thus we take current music out before shuffling
@@ -327,6 +337,13 @@ class OneshotPlaylist(BasePlaylist):
         else:
             return False
 
+    def upcoming_items(self, count):
+        # index 0 is (or is about to become) the current item
+        with self.playlist_lock:
+            if count <= 0:
+                return []
+            return list(self[1:1 + count])
+
     def point_to(self, index):
         with self.playlist_lock:
             self.version += 1
@@ -363,6 +380,19 @@ class RepeatPlaylist(BasePlaylist):
         if len(self) == 0:
             return False
         return self[self.next_index()]
+
+    def upcoming_items(self, count):
+        # wraps around, but never repeats an item within one window
+        with self.playlist_lock:
+            n = len(self)
+            if n <= 1 or count <= 0:
+                return []
+            items = []
+            index = self.current_index
+            for _ in range(min(count, n - 1)):
+                index = (index + 1) % n
+                items.append(self[index])
+            return items
 
 
 class RandomPlaylist(BasePlaylist):
