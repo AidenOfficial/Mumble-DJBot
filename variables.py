@@ -1,12 +1,12 @@
 from typing import Type, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import mumbleBot
+    import bot.core
     import media.playlist
     import media.cache
     import database
 
-bot: 'mumbleBot.MumbleBot' = None
+bot: 'bot.core.MumbleBot' = None
 playlist: 'media.playlist.BasePlaylist' = None
 cache: 'media.cache.MusicCache' = None
 

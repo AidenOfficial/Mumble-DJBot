@@ -102,8 +102,8 @@ def check_imports():
     except Exception as e:
         record("import util", "FAIL", repr(e))
     try:
-        import command
-        record("import command (全部命令接线)", "PASS")
+        import commands as command
+        record("import commands (全部命令接线)", "PASS")
         avail = getattr(command, "_spotify_available", None)
         if avail is True:
             record("media.spotify 模块可用", "PASS")
