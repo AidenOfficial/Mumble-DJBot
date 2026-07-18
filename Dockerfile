@@ -1,4 +1,13 @@
 ARG ARCH=
+# 新版 Web UI(webui/)在独立 stage 里用 node 构建,产出 webui/dist。
+# 仓库里也提交了 dist,这个 stage 保证镜像总是带着与源码一致的最新构建。
+FROM node:22-slim AS webui-builder
+WORKDIR /webui
+COPY webui/package.json webui/package-lock.json ./
+RUN npm ci
+COPY webui/ ./
+RUN npm run build
+
 FROM python:3.12-slim-bookworm AS python-builder
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /botamusique
@@ -23,6 +32,7 @@ RUN apt update && \
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
 COPY --from=python-builder /botamusique /botamusique
+COPY --from=webui-builder /webui/dist /botamusique/webui/dist
 WORKDIR /botamusique
 # 修掉可能存在的 Windows CRLF 换行(否则容器内会报 bad interpreter),再赋可执行权限。
 RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh

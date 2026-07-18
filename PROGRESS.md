@@ -108,7 +108,15 @@
 - [x] 队列拖拽排序:HTML5 drag(拖柄⠿、目标高亮、乐观重排),drop 调 /api/queue move;Playwright 实测 drag_to 后 POST {action:move,index:3,to:1} 正确。
 - [x] Library 页:关键词防抖筛选 + 类型 chips + 标签下拉(/library/info)、分页,逐条 ⤴ Next / + Queue(走旧 /post add_item_next/bottom,✓/✗ 反馈);上传按钮(multipart /upload,409/成功/失败提示)。截图桌面浅色+移动暗色过关。
 
-### B6. 发布准备文档 — TODO
+### B6. 发布准备(不执行部署) — DONE
+
+- `/` 已切换为新 UI(dist 缺失时自动回退旧界面,不炸);旧界面保留在 `/legacy`;`/app/` 挂载保留兼容书签;webui base 改相对路径(`./`),双挂载均可用(Playwright 实测 `/` 正常渲染)。
+- Dockerfile 增加 `node:22-slim` 构建 stage(npm ci + build),最终镜像 COPY dist(仓库也提交了 dist,双保险;未执行 docker 构建/部署)。
+- `deploy/WEBUI.md`:NAS compose(bot 不发布端口 + cloudflared 同网络)+ Cloudflare Tunnel/Access 步骤 + 验证清单;确认监听地址/端口均配置化,所有写操作仍走 requires_auth 约定(auth_method 切换无需改新 UI)。
+
+## 最终总结(2026-07-18)
+
+**全部目标 DONE。** 提交序列(本地,待 push):A1 缓存清理 → A2 边下边播 → A3 预取 → B0 方案 → B2 API → webui 脚手架+B1 → B5 控制/队列 → B3 搜索 → B4 统计 → B5 拖拽+曲库 → B6 切换/文档。测试 20 → **109 passed**;pyflakes 无新增告警;每步截图/Playwright 交互验证。
 
 ## DECISIONS 待决区
 
@@ -121,4 +129,8 @@
 
 ## 本机待复验清单(用户回来后)
 
-- (待补充)
+1. **push + PR**:给会话授写权限后让我 push(11 个本地提交)并开 draft PR;或告诉我贴 patch。
+2. **A2 端到端**:configuration.ini 打开 `stream_while_downloading = True`,用长 B 站视频在 Team B 频道实测边下边播(harness 断言音频先于下载完成到达);Windows 上确认 yt-dlp `nopart` 行为正常。
+3. **A1 观察**:跑一天后看日志 `cleanup:` 行为与 var.db `cleanup/last_run`。
+4. **新 Web UI 实机**:本机起 bot 后浏览器看 `/`(新)与 `/legacy`(旧),四个页面过一遍;`web/templates/index.*.html` 为构建生成物,本机已有,勿删。
+5. **B 站搜索**:生产网络下若遇 412,配置 `[youtube_dl] cookie_file` 即可(web_search 会自动带上)。

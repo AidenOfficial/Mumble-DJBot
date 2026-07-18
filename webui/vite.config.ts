@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 // Served by Flask at /app/ in production; the dev server proxies /api to a
 // locally running bot (interface.py) so `npm run dev` works against real data.
 export default defineConfig({
-  base: '/app/',
+  base: './',
   plugins: [vue(), tailwindcss()],
   server: {
     proxy: {

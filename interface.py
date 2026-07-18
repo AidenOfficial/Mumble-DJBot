@@ -231,17 +231,42 @@ def get_all_dirs():
     return dirs
 
 
-@web.route("/", methods=['GET'])
-@requires_auth
-def index():
-    return open(os.path.join(root_dir, f"web/templates/index.{var.language}.html"), "r").read()
-
-
-# New web interface (webui/dist, built with Vite). Served at /app/ while the
-# legacy UI stays on / - the switch happens once the new UI reaches parity.
+# The new web interface (webui/dist, built with Vite) is the default UI at /;
+# the legacy jQuery interface stays available at /legacy. Reverting the switch
+# is a one-commit rollback of these routes.
 webui_dist = os.path.join(root_dir, "webui", "dist")
 
 
+def _legacy_index():
+    return open(os.path.join(root_dir, f"web/templates/index.{var.language}.html"), "r").read()
+
+
+@web.route("/", methods=['GET'])
+@requires_auth
+def index():
+    if os.path.isfile(os.path.join(webui_dist, "index.html")):
+        return send_from_directory(webui_dist, "index.html")
+    return _legacy_index()  # dist not built - keep the bot usable
+
+
+@web.route("/legacy", methods=['GET'])
+@requires_auth
+def legacy_index():
+    return _legacy_index()
+
+
+@web.route("/assets/<path:path>", methods=['GET'])
+@requires_auth
+def webui_assets(path):
+    return send_from_directory(os.path.join(webui_dist, "assets"), path)
+
+
+@web.route("/favicon.svg", methods=['GET'])
+def webui_favicon():
+    return send_from_directory(webui_dist, "favicon.svg")
+
+
+# Old mount point of the new UI - kept so bookmarks keep working.
 @web.route("/app", methods=['GET'])
 @requires_auth
 def webui_root():
