@@ -1,6 +1,7 @@
 from typing import Type, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import bot.cleanup
     import bot.core
     import media.playlist
     import media.cache
@@ -9,6 +10,7 @@ if TYPE_CHECKING:
 bot: 'bot.core.MumbleBot' = None
 playlist: 'media.playlist.BasePlaylist' = None
 cache: 'media.cache.MusicCache' = None
+cleaner: 'bot.cleanup.CacheCleaner' = None
 
 user = ""
 is_proxified = False

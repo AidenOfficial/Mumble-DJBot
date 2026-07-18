@@ -16,6 +16,7 @@ import variables as var
 from database import SettingsDatabase, MusicDatabase, DatabaseMigration
 from media.cache import MusicCache
 
+from .cleanup import CacheCleaner
 from .core import MumbleBot
 
 
@@ -228,6 +229,12 @@ def main():
         tt.daemon = True
         bot_logger.info('Starting web interface on {}:{}'.format(wi_addr, wi_port))
         tt.start()
+
+    # ============================
+    #   Periodic cache cleanup
+    # ============================
+    var.cleaner = CacheCleaner()
+    var.cleaner.start()
 
     # ============================
     #   Crash safety / watchdog
