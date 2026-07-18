@@ -89,7 +89,13 @@
 
 ### B4. 统计页 — TODO
 
-### B5. Dashboard 完整功能 — TODO
+### B5. Dashboard 完整功能 — DOING
+
+- [x] 后端 `POST /api/controls`(pause/resume/skip/stop/clear/mode/volume,语义逐条镜像旧 /post,响应返回最新 status 供前端乐观更新);`GET /api/queue`(全队列摘要+is_current)、`POST /api/queue`(move/top/remove/play/clear;move 带 current_index 修正,remove 镜像旧 delete_music 语义)。17 个新单测(含 move 三种 index 位移、边界 400),全量 88 passed。
+- [x] 前端:Controls.vue(播放/暂停、跳过、音量滑条 150ms 防抖、ducking 徽标、四模式切换 chips)+ QueueList.vue(缩略图/时长、当前曲高亮、▶ 插播 / ⤴ 置顶 / ✕ 删除、Clear all;按 status.version 变化自动刷新 + 10s 兜底轮询);useStatus 重构为模块级单例 store,控制操作直接 applyStatus 响应。
+- [x] 截图自查(桌面暗色 + 移动浅色),harness 点击 Pause 断言 POST 真实到达。
+- [ ] 拖拽排序(后端 move API 已备好,前端拖拽后置)。
+- [ ] 曲库浏览/上传页(复用旧 /library、/upload)。
 
 ### B6. 发布准备文档 — TODO
 

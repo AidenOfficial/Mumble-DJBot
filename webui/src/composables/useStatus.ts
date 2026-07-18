@@ -1,63 +1,68 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { fetchStatus, type BotStatus } from '../api'
+import { computed, reactive, ref } from 'vue'
+import { fetchStatus, postControls, type BotStatus, type ControlAction } from '../api'
 
 const POLL_MS = 3000
 
-/**
- * Polls /api/status and exposes a smoothly advancing playhead: between
- * polls the position is extrapolated from the last server value with
- * requestAnimationFrame, then snapped on the next poll.
- */
+// Module-level singleton: every component shares the same status stream and
+// the same smoothly advancing playhead clock.
+const status = ref<BotStatus | null>(null)
+const error = ref<string | null>(null)
+const clock = reactive({ playhead: 0 })
+
+let started = false
+let lastSync = 0 // performance.now() at the time of the last poll
+
+function applyStatus(s: BotStatus) {
+  status.value = s
+  lastSync = performance.now()
+  clock.playhead = s.playhead
+  error.value = null
+}
+
+async function poll() {
+  try {
+    applyStatus(await fetchStatus())
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+function tick() {
+  const s = status.value
+  if (s && s.play && !s.empty) {
+    const elapsed = (performance.now() - lastSync) / 1000
+    const duration = s.current?.duration || 0
+    const pos = s.playhead + elapsed
+    clock.playhead = duration > 0 ? Math.min(pos, duration) : pos
+  }
+  requestAnimationFrame(tick)
+}
+
+function ensureStarted() {
+  if (started) return
+  started = true
+  poll()
+  setInterval(poll, POLL_MS)
+  requestAnimationFrame(tick)
+}
+
+/** Fire a control action; the response is a fresh status, applied at once. */
+async function control(body: ControlAction) {
+  try {
+    applyStatus(await postControls(body))
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
 export function useStatus() {
-  const status = ref<BotStatus | null>(null)
-  const error = ref<string | null>(null)
-  const clock = reactive({ playhead: 0 })
-
-  let pollTimer: ReturnType<typeof setInterval> | undefined
-  let raf = 0
-  let lastSync = 0 // performance.now() at the time of the last poll
-
-  const tick = () => {
-    const s = status.value
-    if (s && s.play && !s.empty) {
-      const elapsed = (performance.now() - lastSync) / 1000
-      const duration = s.current?.duration || 0
-      const pos = s.playhead + elapsed
-      clock.playhead = duration > 0 ? Math.min(pos, duration) : pos
-    }
-    raf = requestAnimationFrame(tick)
-  }
-
-  const poll = async () => {
-    try {
-      const s = await fetchStatus()
-      status.value = s
-      lastSync = performance.now()
-      clock.playhead = s.playhead
-      error.value = null
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    }
-  }
-
-  onMounted(() => {
-    poll()
-    pollTimer = setInterval(poll, POLL_MS)
-    raf = requestAnimationFrame(tick)
-  })
-
-  onBeforeUnmount(() => {
-    if (pollTimer) clearInterval(pollTimer)
-    cancelAnimationFrame(raf)
-  })
-
+  ensureStarted()
   const progress = computed(() => {
     const duration = status.value?.current?.duration || 0
     if (!duration) return 0
     return Math.min(1, clock.playhead / duration)
   })
-
-  return { status, error, clock, progress, refresh: poll }
+  return { status, error, clock, progress, refresh: poll, control, applyStatus }
 }
 
 export function formatTime(seconds: number): string {

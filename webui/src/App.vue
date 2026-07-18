@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import NowPlaying from './components/NowPlaying.vue'
+import QueueList from './components/QueueList.vue'
 
 type Theme = 'light' | 'dark' | 'auto'
 const theme = ref<Theme>('auto')
@@ -61,6 +62,7 @@ onMounted(() => {
 
     <main class="flex-1">
       <NowPlaying />
+      <QueueList />
     </main>
   </div>
 </template>

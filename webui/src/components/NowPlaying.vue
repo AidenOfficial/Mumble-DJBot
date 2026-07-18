@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { thumbnailUrl } from '../api'
+import Controls from './Controls.vue'
 import { formatTime, useStatus } from '../composables/useStatus'
 
 const { status, error, clock, progress } = useStatus()
@@ -98,6 +99,9 @@ const sourceLabel = computed(() => {
         <span>{{ current.duration ? formatTime(current.duration) : '--:--' }}</span>
       </div>
     </div>
+
+    <!-- controls -->
+    <Controls />
 
     <!-- queue summary -->
     <p v-if="status && !status.empty" class="text-sm" :style="{ color: 'var(--c-text-muted)' }">
