@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 import sqlite3
 from functools import wraps
-from flask import Flask, render_template, request, redirect, send_file, Response, jsonify, abort, session
+from flask import Flask, render_template, request, redirect, send_file, send_from_directory, Response, jsonify, \
+    abort, session
 from werkzeug.utils import secure_filename
 
 import variables as var
@@ -234,6 +235,26 @@ def get_all_dirs():
 @requires_auth
 def index():
     return open(os.path.join(root_dir, f"web/templates/index.{var.language}.html"), "r").read()
+
+
+# New web interface (webui/dist, built with Vite). Served at /app/ while the
+# legacy UI stays on / - the switch happens once the new UI reaches parity.
+webui_dist = os.path.join(root_dir, "webui", "dist")
+
+
+@web.route("/app", methods=['GET'])
+@requires_auth
+def webui_root():
+    return redirect("./app/", code=302)
+
+
+@web.route("/app/", defaults={'path': 'index.html'}, methods=['GET'])
+@web.route("/app/<path:path>", methods=['GET'])
+@requires_auth
+def webui_app(path):
+    if not os.path.isdir(webui_dist):
+        abort(404)
+    return send_from_directory(webui_dist, path)
 
 
 @web.route("/playlist", methods=['GET'])

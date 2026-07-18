@@ -71,12 +71,19 @@
 
 **实施顺序**:B2 后端 status API → webui 脚手架+B1 token 体系 → B2 Now Playing → B5 队列/控制 → B3 搜索 → B4 统计 → 切换 `/` + B6 文档。
 
-### B1. 设计与审美 — TODO
+### B1. 设计与审美 — DOING
+
+- [x] 设计 token 体系(webui/src/style.css):surface/text/accent/feedback/radius/shadow 全部 CSS 自定义属性,浅色默认 + prefers-color-scheme 暗色 + `[data-theme]` 强制覆盖(App 头部有 auto/light/dark 三态切换,localStorage 记忆);`@theme inline` 桥接进 Tailwind 4 实用类。主色 #6d5ef2(暗色 #8577ff),中性色分 bg/surface/surface-2 三层。
+- [x] 截图自查:桌面+移动 × 深浅主题四张,层次/间距/对比度 OK,无 console 错误。
+- [ ] 后续页面沿用此体系,统计图表配色对齐(B4)。
 
 ### B2. Now Playing 主界面 — DOING
 
 - [x] 后端:`web_api.py` Blueprint(`create_blueprint(requires_auth)` 注入鉴权,interface.py 注册,挂 `/api/*`):`GET /api/status`(轻量轮询:play/mode/volume/ducking/playhead/queue_length/current 摘要+server_time,不含缩略图)、`GET /api/thumbnail/<id>`(JPEG 字节,Cache-Control 1 天,前端按 id 换歌时取一次)。6 个新单测(Flask test client + fake bot/playlist/cache),全量 71 passed。
-- [ ] webui 脚手架 + Now Playing 页面(待 B1 token 体系一起做)。
+- [x] webui/ 脚手架:Vite 8 + Vue 3.5(`<script setup>` TS)+ Tailwind 4,base=/app/,dev proxy /api→8181,package-lock 锁定;node_modules 入 gitignore,**dist/ 随仓库提交**(无 node 的部署环境直接可用)。
+- [x] Now Playing 雏形(NowPlaying.vue + useStatus.ts):封面(有 thumbnail 按 id 取一次不闪烁,无则渐变占位)、曲名/来源徽标、进度条(rAF 前端平滑推算 + 3s 轮询校准,超时钳到 duration)、队列摘要/暂停标记、错误提示。
+- [x] Flask 挂载:`/app` 302 → `/app/`,`/app/<path>` 走 send_from_directory(requires_auth 保持),旧 `/` 不动。
+- [ ] 播放控制按钮(播放/暂停/跳过/音量)待 B5 controls API 一起接。
 
 ### B3. 统一搜索(YouTube + Bilibili) — TODO
 

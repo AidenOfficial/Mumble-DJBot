@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Design tokens - the single source of truth for color, radius and shadow.
+   Light is the default; dark kicks in via prefers-color-scheme and can be
+   forced either way with [data-theme] set on <html> by the theme toggle.
+   ========================================================================== */
+
+:root {
+  /* surfaces */
+  --c-bg: #f6f6f8;
+  --c-surface: #ffffff;
+  --c-surface-2: #eeeef2;
+  --c-border: #e2e2e8;
+
+  /* text */
+  --c-text: #17171c;
+  --c-text-muted: #6d6d7a;
+  --c-text-faint: #a3a3b0;
+
+  /* brand */
+  --c-accent: #6d5ef2;
+  --c-accent-strong: #5646e8;
+  --c-accent-soft: rgba(109, 94, 242, 0.12);
+  --c-on-accent: #ffffff;
+
+  /* feedback */
+  --c-danger: #dc3d51;
+  --c-success: #1fa060;
+
+  /* shape */
+  --radius-s: 8px;
+  --radius-m: 14px;
+  --radius-l: 22px;
+
+  --shadow-1: 0 1px 2px rgba(20, 20, 30, 0.06), 0 2px 8px rgba(20, 20, 30, 0.06);
+  --shadow-2: 0 4px 12px rgba(20, 20, 30, 0.10), 0 12px 32px rgba(20, 20, 30, 0.10);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-bg: #101014;
+    --c-surface: #17171d;
+    --c-surface-2: #1f1f27;
+    --c-border: #2a2a34;
+
+    --c-text: #ececf1;
+    --c-text-muted: #9a9aa8;
+    --c-text-faint: #5c5c6a;
+
+    --c-accent: #8577ff;
+    --c-accent-strong: #9a8eff;
+    --c-accent-soft: rgba(133, 119, 255, 0.16);
+    --c-on-accent: #14121f;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.35);
+    --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.45);
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="light"] {
+  --c-bg: #f6f6f8;
+  --c-surface: #ffffff;
+  --c-surface-2: #eeeef2;
+  --c-border: #e2e2e8;
+  --c-text: #17171c;
+  --c-text-muted: #6d6d7a;
+  --c-text-faint: #a3a3b0;
+  --c-accent: #6d5ef2;
+  --c-accent-strong: #5646e8;
+  --c-accent-soft: rgba(109, 94, 242, 0.12);
+  --c-on-accent: #ffffff;
+  --shadow-1: 0 1px 2px rgba(20, 20, 30, 0.06), 0 2px 8px rgba(20, 20, 30, 0.06);
+  --shadow-2: 0 4px 12px rgba(20, 20, 30, 0.10), 0 12px 32px rgba(20, 20, 30, 0.10);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --c-bg: #101014;
+  --c-surface: #17171d;
+  --c-surface-2: #1f1f27;
+  --c-border: #2a2a34;
+  --c-text: #ececf1;
+  --c-text-muted: #9a9aa8;
+  --c-text-faint: #5c5c6a;
+  --c-accent: #8577ff;
+  --c-accent-strong: #9a8eff;
+  --c-accent-soft: rgba(133, 119, 255, 0.16);
+  --c-on-accent: #14121f;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+/* Bridge tokens into Tailwind utility names (bg-surface, text-muted, ...) */
+@theme inline {
+  --color-bg: var(--c-bg);
+  --color-surface: var(--c-surface);
+  --color-surface-2: var(--c-surface-2);
+  --color-border-c: var(--c-border);
+  --color-ink: var(--c-text);
+  --color-muted: var(--c-text-muted);
+  --color-faint: var(--c-text-faint);
+  --color-accent: var(--c-accent);
+  --color-accent-strong: var(--c-accent-strong);
+  --color-accent-soft: var(--c-accent-soft);
+  --color-on-accent: var(--c-on-accent);
+  --color-danger: var(--c-danger);
+  --color-success: var(--c-success);
+  --radius-s: var(--radius-s);
+  --radius-m: var(--radius-m);
+  --radius-l: var(--radius-l);
+  --font-sans: "Inter var", system-ui, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html, body, #app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: system-ui, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 160ms ease, color 160ms ease;
+}

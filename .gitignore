@@ -129,3 +129,4 @@ templates/*.html
 
 # Pycharm
 .idea/
+webui/node_modules/
