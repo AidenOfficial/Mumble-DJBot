@@ -40,7 +40,12 @@
 
 ## DECISIONS 待决区
 
-(暂无)
+### ⚠️ push 被 403 拒绝(需要用户处理)
+
+- 现象:`git push` 与 GitHub API 写操作均返回 403(`Resource not accessible by integration`);读操作正常。本会话的 GitHub 凭据对 AidenOfficial/Mumble-DJBot 只有读权限。
+- 影响:所有提交暂存在会话容器本地(容器是临时的,**会话闲置回收后本地提交会丢失**)。
+- 备选:1) 在 Claude Code 会话/GitHub App 设置里给该仓库授予写权限(推荐);2) 用户本地手动拉取(无法直接从容器拉,需我把 patch 贴出来)。
+- 我会每轮重试 push,权限修复后会自动推上去并开 draft PR。
 
 ## 本机待复验清单(用户回来后)
 
