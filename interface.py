@@ -63,6 +63,8 @@ class ReverseProxied(object):
         return self.app(environ, start_response)
 
 
+import web_api
+
 root_dir = os.path.dirname(__file__)
 web = Flask(__name__, template_folder=os.path.join(root_dir, "web/templates"))
 #web.config['TEMPLATES_AUTO_RELOAD'] = True
@@ -178,6 +180,10 @@ def requires_auth(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+# JSON API for the new web interface (all routes under /api/)
+web.register_blueprint(web_api.create_blueprint(requires_auth))
 
 
 def tag_color(tag):

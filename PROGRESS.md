@@ -73,7 +73,10 @@
 
 ### B1. 设计与审美 — TODO
 
-### B2. Now Playing 主界面 — TODO
+### B2. Now Playing 主界面 — DOING
+
+- [x] 后端:`web_api.py` Blueprint(`create_blueprint(requires_auth)` 注入鉴权,interface.py 注册,挂 `/api/*`):`GET /api/status`(轻量轮询:play/mode/volume/ducking/playhead/queue_length/current 摘要+server_time,不含缩略图)、`GET /api/thumbnail/<id>`(JPEG 字节,Cache-Control 1 天,前端按 id 换歌时取一次)。6 个新单测(Flask test client + fake bot/playlist/cache),全量 71 passed。
+- [ ] webui 脚手架 + Now Playing 页面(待 B1 token 体系一起做)。
 
 ### B3. 统一搜索(YouTube + Bilibili) — TODO
 
