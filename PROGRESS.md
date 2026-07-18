@@ -92,7 +92,13 @@
 - 前端 SearchPage.vue:400ms 防抖 + stale 响应丢弃、加载态、来源徽标(YouTube 红/Bilibili 蓝)、降级提示、逐条 + Queue 按钮(pending/Queued ✓/Failed);头部导航 Now Playing | Search。
 - 验证:12 个新单测(解析器 fixture、交错合并、降级、endpoint mock、add 规范化与垃圾输入 400),全量 100 passed;真实搜索冒烟;stub+Playwright 点击断言 POST 正确;截图两断点两主题过关。
 
-### B4. 统计页 — TODO
+### B4. 统计页 — DONE
+
+- 数据源:`database.py` 新增 `PlayHistoryDatabase`(play_history 表,首用建表不动迁移机制;item_id/title/type/user/duration/played_at/skipped + 索引),挂 music_db 同一文件(`var.play_history`,startup 初始化)。
+- 埋点:`launch_music` 仅在 `start_from == 0` 时记一行(resume/流式 relaunch 不重复计数);skip 标记走两个显式入口(聊天 `!skip` 与 web `/api/controls skip`),更新该曲最近一行 `skipped=1`。
+- 聚合:`stats()` 单 SQL 通道返回 总播放/总时长/独立曲目数/来源占比/Top 曲目/Top 点歌人/24h 本地时段直方/星期直方/最常被 skip/最忙一天/近 30 天曲线;`GET /api/stats` 暴露。
+- 前端 StatsPage.vue:stat tiles、来源占比条(2px 间隙 + 带数值图例,浅色对比度 WARN 按 relief 规则用可见标签补偿)、时段直方图(单色渐进 + title 悬浮)、Most played(镇站之宝徽标)/Top requesters 条形列表、Most skipped 趣味卡。配色过 dataviz 六检(双主题 categorical 验证 PASS)。
+- 验证:9 个新单测(聚合 SQL 注入固定时间戳、skip 只标最新行、空库、埋点只记 fresh start),全量 109 passed;截图桌面暗色+移动浅色过关。
 
 ### B5. Dashboard 完整功能 — DOING
 

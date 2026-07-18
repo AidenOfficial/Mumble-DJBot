@@ -84,6 +84,18 @@ class PlayerMixin:
 
         self.log.info("bot: play music " + music_wrapper.format_debug_string())
 
+        # Statistics: one history row per playback start (a start_from > 0
+        # is a resume or a stream-while-downloading relaunch, not a play).
+        if start_from == 0 and var.play_history is not None:
+            try:
+                item = music_wrapper.item()
+                var.play_history.record(
+                    item.id, item.format_title(), getattr(item, 'type', ''),
+                    getattr(music_wrapper, 'user', '') or '',
+                    getattr(item, 'duration', 0) or 0)
+            except Exception:
+                self.log.debug("bot: could not record play history", exc_info=True)
+
         if var.config.getboolean('bot', 'announce_current_music'):
             self.send_channel_msg(music_wrapper.format_current_playing())
 

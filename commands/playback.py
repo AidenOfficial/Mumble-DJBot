@@ -96,6 +96,15 @@ def cmd_current_music(bot, user, text, command, parameter):
 
 
 def cmd_skip(bot, user, text, command, parameter):
+    # statistics: an explicit skip flags the current play as skipped
+    if var.play_history is not None and not bot.is_pause:
+        try:
+            current = var.playlist.current_item()
+            if current:
+                var.play_history.mark_skipped(current.id)
+        except Exception:
+            pass
+
     if not bot.is_pause:
         bot.interrupt()
     else:

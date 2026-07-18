@@ -88,8 +88,20 @@ def _set_mode(mode):
     var.db.set('playlist', 'playback_mode', mode)
 
 
+def _mark_current_skipped():
+    if var.play_history is None:
+        return
+    try:
+        current = var.playlist.current_item()
+        if current and not var.bot.is_pause:
+            var.play_history.mark_skipped(current.id)
+    except Exception:
+        pass
+
+
 def _skip():
     """Same semantics as the legacy /post action=next."""
+    _mark_current_skipped()
     if not var.bot.is_pause:
         var.bot.interrupt()
     else:
@@ -274,6 +286,13 @@ def create_blueprint(requires_auth):
             # item, start downloading right away
             var.bot.async_download_next()
         return jsonify(_status_payload())
+
+    @api.route('/stats', methods=['GET'])
+    @requires_auth
+    def api_stats():
+        if var.play_history is None:
+            abort(503)
+        return jsonify(var.play_history.stats())
 
     @api.route('/thumbnail/<item_id>', methods=['GET'])
     @requires_auth

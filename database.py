@@ -686,3 +686,119 @@ class DatabaseMigration:
         conn.commit()
 
         return 4  # return new version number
+
+
+class PlayHistoryDatabase:
+    """Lightweight play log used by the web interface's statistics page.
+
+    Separate from the music table: one row per playback start, appended by
+    the player. The table is created on first use (no migration machinery
+    needed - it never changes existing tables).
+    """
+
+    def __init__(self, db_path):
+        self.db_path = db_path
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS play_history ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "item_id TEXT NOT NULL,"
+            "title TEXT NOT NULL DEFAULT '',"
+            "type TEXT NOT NULL DEFAULT '',"
+            "user TEXT NOT NULL DEFAULT '',"
+            "duration REAL NOT NULL DEFAULT 0,"
+            "played_at REAL NOT NULL,"
+            "skipped INTEGER NOT NULL DEFAULT 0)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_play_history_played_at "
+                     "ON play_history (played_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_play_history_item "
+                     "ON play_history (item_id)")
+        conn.commit()
+        conn.close()
+
+    def record(self, item_id, title, type, user, duration=0, played_at=None):
+        if played_at is None:
+            played_at = time.time()
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "INSERT INTO play_history (item_id, title, type, user, duration, played_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (item_id, title or '', type or '', user or '', duration or 0, played_at))
+        conn.commit()
+        conn.close()
+
+    def mark_skipped(self, item_id):
+        """Flag the most recent play of item_id as skipped."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "UPDATE play_history SET skipped = 1 WHERE id = ("
+            "SELECT id FROM play_history WHERE item_id = ? "
+            "ORDER BY played_at DESC LIMIT 1)", (item_id,))
+        conn.commit()
+        conn.close()
+
+    def stats(self, top_n=10):
+        """All aggregations for the stats page in one call."""
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+
+        def rows(sql, *params):
+            return cur.execute(sql, params).fetchall()
+
+        total_plays, total_seconds, unique_tracks = rows(
+            "SELECT COUNT(*), COALESCE(SUM(duration), 0), COUNT(DISTINCT item_id) "
+            "FROM play_history")[0]
+
+        by_type = [{'type': t, 'count': c} for t, c in rows(
+            "SELECT type, COUNT(*) FROM play_history GROUP BY type "
+            "ORDER BY COUNT(*) DESC")]
+
+        top_tracks = [{'item_id': i, 'title': t, 'count': c} for i, t, c in rows(
+            "SELECT item_id, MAX(title), COUNT(*) AS c FROM play_history "
+            "GROUP BY item_id ORDER BY c DESC, MAX(played_at) DESC LIMIT ?", top_n)]
+
+        top_users = [{'user': u, 'count': c} for u, c in rows(
+            "SELECT user, COUNT(*) AS c FROM play_history WHERE user != '' "
+            "GROUP BY user ORDER BY c DESC LIMIT ?", top_n)]
+
+        # local-time hour-of-day histogram (0..23)
+        hour_rows = dict(rows(
+            "SELECT CAST(strftime('%H', played_at, 'unixepoch', 'localtime') AS INTEGER), "
+            "COUNT(*) FROM play_history GROUP BY 1"))
+        hours = [hour_rows.get(h, 0) for h in range(24)]
+
+        weekday_rows = dict(rows(
+            "SELECT CAST(strftime('%w', played_at, 'unixepoch', 'localtime') AS INTEGER), "
+            "COUNT(*) FROM play_history GROUP BY 1"))
+        weekdays = [weekday_rows.get(d, 0) for d in range(7)]  # 0 = Sunday
+
+        most_skipped = [{'item_id': i, 'title': t, 'count': c} for i, t, c in rows(
+            "SELECT item_id, MAX(title), COUNT(*) AS c FROM play_history "
+            "WHERE skipped = 1 GROUP BY item_id ORDER BY c DESC LIMIT 5")]
+
+        busiest = rows(
+            "SELECT date(played_at, 'unixepoch', 'localtime') AS d, COUNT(*) AS c "
+            "FROM play_history GROUP BY d ORDER BY c DESC LIMIT 1")
+        busiest_day = ({'date': busiest[0][0], 'count': busiest[0][1]}
+                       if busiest else None)
+
+        last_30d = [{'date': d, 'count': c} for d, c in rows(
+            "SELECT date(played_at, 'unixepoch', 'localtime') AS d, COUNT(*) "
+            "FROM play_history "
+            "WHERE played_at >= strftime('%s', 'now', '-30 days') "
+            "GROUP BY d ORDER BY d")]
+
+        conn.close()
+        return {
+            'total_plays': total_plays,
+            'total_seconds': int(total_seconds),
+            'unique_tracks': unique_tracks,
+            'by_type': by_type,
+            'top_tracks': top_tracks,
+            'top_users': top_users,
+            'hours': hours,
+            'weekdays': weekdays,
+            'most_skipped': most_skipped,
+            'busiest_day': busiest_day,
+            'last_30d': last_30d,
+        }

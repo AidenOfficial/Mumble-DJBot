@@ -13,7 +13,7 @@ import constants
 import media.playlist
 import util
 import variables as var
-from database import SettingsDatabase, MusicDatabase, DatabaseMigration
+from database import SettingsDatabase, MusicDatabase, DatabaseMigration, PlayHistoryDatabase
 from media.cache import MusicCache
 
 from .cleanup import CacheCleaner
@@ -163,6 +163,10 @@ def main():
         var.music_db = MusicDatabase(":memory:")
 
     DatabaseMigration(var.db, var.music_db).migrate()
+
+    # Play log for the web interface statistics; lives next to the music
+    # database (own table, created on first use).
+    var.play_history = PlayHistoryDatabase(var.music_db.db_path)
 
     var.music_folder = util.solve_filepath(var.config.get('bot', 'music_folder'))
     if not var.music_folder.endswith(os.sep):
