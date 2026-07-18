@@ -12,7 +12,10 @@ import time
 from flask import Blueprint, Response, abort, jsonify, request
 
 import media.playlist
+import util
 import variables as var
+import web_search
+from media.cache import get_cached_wrapper_from_scrap
 
 
 def _current_wrapper():
@@ -234,6 +237,42 @@ def create_blueprint(requires_auth):
             var.bot.clear()
         else:
             abort(400)
+        return jsonify(_status_payload())
+
+    @api.route('/search', methods=['GET'])
+    @requires_auth
+    def api_search():
+        query = (request.args.get('q') or '').strip()[:200]
+        if len(query) < 2:
+            abort(400)
+        try:
+            limit = min(12, max(1, int(request.args.get('limit', 6))))
+        except (TypeError, ValueError):
+            limit = 6
+        results, failed = web_search.unified_search(query, limit)
+        return jsonify({'query': query, 'results': results, 'failed': failed})
+
+    @api.route('/search/add', methods=['POST'])
+    @requires_auth
+    def api_search_add():
+        """Add a search result to the queue. Bilibili results go through the
+        av/BV normalization every other entry point uses."""
+        payload = request.get_json(silent=True) or request.form
+        if not payload:
+            abort(400)
+        source = payload.get('source')
+        url = (payload.get('url') or '').strip()
+        if source == 'bilibili':
+            url = util.get_bilibili_url_from_input(payload.get('id') or url)
+        if not url or not url.lower().startswith(('http://', 'https://')):
+            abort(400)
+        music_wrapper = get_cached_wrapper_from_scrap(
+            type='url', url=url, user='Web Search')
+        var.playlist.append(music_wrapper)
+        if len(var.playlist) == 2:
+            # mirror the legacy add_url behavior: if this became the next
+            # item, start downloading right away
+            var.bot.async_download_next()
         return jsonify(_status_payload())
 
     @api.route('/thumbnail/<item_id>', methods=['GET'])

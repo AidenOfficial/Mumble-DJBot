@@ -85,7 +85,12 @@
 - [x] Flask 挂载:`/app` 302 → `/app/`,`/app/<path>` 走 send_from_directory(requires_auth 保持),旧 `/` 不动。
 - [ ] 播放控制按钮(播放/暂停/跳过/音量)待 B5 controls API 一起接。
 
-### B3. 统一搜索(YouTube + Bilibili) — TODO
+### B3. 统一搜索(YouTube + Bilibili) — DONE
+
+- 后端 `web_search.py`:`GET /api/search?q=`(≥2 字符,limit≤12)线程池并行查 yt-dlp `ytsearchN:`(extract_flat)与 B 站公开搜索 API(UA+Referer+cookie 种子请求防 412,复用 youtube_dl cookie_file 配置);单源失败降级为 `failed` 标记;解析器为纯函数可单测(em 标签剥离、MM:SS/HH:MM:SS 时长、protocol-relative 图片补 https)。**两源已在本容器真实调通**。
+- `POST /api/search/add`:B 站结果走 util.get_bilibili_url_from_input 的 av/BV 规范化;拒绝非 http(s) URL;沿用 add_url 语义(len==2 时触发预下载)。
+- 前端 SearchPage.vue:400ms 防抖 + stale 响应丢弃、加载态、来源徽标(YouTube 红/Bilibili 蓝)、降级提示、逐条 + Queue 按钮(pending/Queued ✓/Failed);头部导航 Now Playing | Search。
+- 验证:12 个新单测(解析器 fixture、交错合并、降级、endpoint mock、add 规范化与垃圾输入 400),全量 100 passed;真实搜索冒烟;stub+Playwright 点击断言 POST 正确;截图两断点两主题过关。
 
 ### B4. 统计页 — TODO
 

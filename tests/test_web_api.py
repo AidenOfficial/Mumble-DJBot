@@ -114,6 +114,9 @@ class FakeBot:
     def play(self, index=-1, start_at=0):
         self.calls.append(('play', index))
 
+    def async_download_next(self):
+        self.calls.append('async_download_next')
+
 
 class FakeCache(dict):
     def get_item_by_id(self, _id):
@@ -324,6 +327,58 @@ class WebApiTestCase(unittest.TestCase):
     def test_queue_clear(self):
         self.post_queue(action='clear')
         self.assertIn('clear', var.bot.calls)
+
+    # ---- search -----------------------------------------------------------
+
+    def test_search_endpoint(self):
+        from unittest import mock
+        import web_search
+        fake = ([{'source': 'youtube', 'id': 'x', 'url': 'https://y/x',
+                  'title': 'T', 'uploader': 'U', 'duration': 10,
+                  'thumbnail': ''}], ['bilibili'])
+        with mock.patch.object(web_search, 'unified_search', return_value=fake):
+            data = self.client.get('/api/search?q=hello').get_json()
+        self.assertEqual('hello', data['query'])
+        self.assertEqual(1, len(data['results']))
+        self.assertEqual(['bilibili'], data['failed'])
+
+    def test_search_requires_query(self):
+        self.assertEqual(400, self.client.get('/api/search').status_code)
+        self.assertEqual(400, self.client.get('/api/search?q=a').status_code)
+
+    def test_search_add_youtube(self):
+        from unittest import mock
+        import web_api
+        wrapper = FakeWrapper(FakeItem(_id='new1', title='New'))
+        with mock.patch.object(web_api, 'get_cached_wrapper_from_scrap',
+                               return_value=wrapper) as scrap:
+            rv = self.client.post('/api/search/add', json={
+                'source': 'youtube', 'url': 'https://www.youtube.com/watch?v=x'})
+        self.assertEqual(200, rv.status_code)
+        scrap.assert_called_once_with(
+            type='url', url='https://www.youtube.com/watch?v=x', user='Web Search')
+        self.assertEqual('new1', var.playlist[-1].id)
+
+    def test_search_add_bilibili_normalizes(self):
+        from unittest import mock
+        import web_api
+        wrapper = FakeWrapper(FakeItem(_id='new2'))
+        with mock.patch.object(web_api, 'get_cached_wrapper_from_scrap',
+                               return_value=wrapper) as scrap:
+            rv = self.client.post('/api/search/add', json={
+                'source': 'bilibili', 'id': 'BV1xx411c7mD'})
+        self.assertEqual(200, rv.status_code)
+        url = scrap.call_args.kwargs['url']
+        self.assertTrue(url.startswith('https://www.bilibili.com/video/av'),
+                        url)
+
+    def test_search_add_rejects_garbage(self):
+        rv = self.client.post('/api/search/add', json={
+            'source': 'youtube', 'url': 'javascript:alert(1)'})
+        self.assertEqual(400, rv.status_code)
+        rv = self.client.post('/api/search/add', json={'source': 'bilibili',
+                                                       'id': 'not-a-bvid'})
+        self.assertEqual(400, rv.status_code)
 
 
 if __name__ == '__main__':
