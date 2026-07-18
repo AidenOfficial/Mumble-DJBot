@@ -31,7 +31,7 @@ def solve_filepath(path):
     if not path:
         return ''
 
-    if path[0] == '/':
+    if os.path.isabs(path):
         return path
     elif os.path.exists(path):
         return path

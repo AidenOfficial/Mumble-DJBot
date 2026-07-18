@@ -5,6 +5,6 @@ Pillow
 mutagen
 requests
 packaging
-pymumble @ git+https://github.com/azlux/pymumble.git@pymumble_py3
+pymumble @ git+https://codeberg.org/pymumble/pymumble@34c47212b0162a87baa5b74638d50f8ee45777bf
 pyradios
 spotdl
