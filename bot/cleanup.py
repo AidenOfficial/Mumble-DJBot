@@ -277,7 +277,7 @@ class CacheCleaner:
                 continue
             # file records with a relative path live in music_folder (see
             # FileItem.uri) and can never be in the removed set
-            if record.get('type') == 'file' and not path.startswith('/'):
+            if record.get('type') == 'file' and not os.path.isabs(path):
                 continue
             if os.path.abspath(path) not in removed:
                 continue

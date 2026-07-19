@@ -238,7 +238,12 @@ webui_dist = os.path.join(root_dir, "webui", "dist")
 
 
 def _legacy_index():
-    return open(os.path.join(root_dir, f"web/templates/index.{var.language}.html"), "r").read()
+    template = os.path.join(root_dir, f"web/templates/index.{var.language}.html")
+    if not os.path.isfile(template):
+        # the legacy UI is a webpack build artifact (npm run build in web/);
+        # dev machines usually only have the new webui dist
+        return "Legacy interface not built on this host (web/templates missing).", 404
+    return open(template, "r").read()
 
 
 @web.route("/", methods=['GET'])
