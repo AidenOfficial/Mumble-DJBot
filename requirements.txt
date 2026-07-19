@@ -5,8 +5,11 @@ Pillow
 mutagen
 requests
 packaging
-# pymumble 2.0 is vendored (see vendor/README.md) so builds never depend on
-# reaching codeberg.org - the NAS network cannot clone from it reliably.
-./vendor/pymumble
+# pymumble 2.x, tracked from upstream https://codeberg.org/pymumble/pymumble
+# via the pymumble-upstream mirror branch of this repo (codeberg.org is not
+# reliably reachable from the NAS; GitHub is). To sync the mirror: fetch
+# upstream main on a machine that can reach codeberg and push it to the
+# pymumble-upstream branch - the next rebuild picks it up.
+pymumble @ git+https://github.com/AidenOfficial/Mumble-DJBot.git@pymumble-upstream
 pyradios
 spotdl
