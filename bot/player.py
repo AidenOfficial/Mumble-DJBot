@@ -104,18 +104,30 @@ class PlayerMixin:
             item = current.item()
         except Exception:
             return False
-        if not getattr(item, 'downloading', False) or ffmpeg_rc in (-9, -15):
-            return False  # not a streaming launch, or killed on purpose
+        if ffmpeg_rc in (-9, -15):
+            return False  # killed on purpose (skip / pause)
+        downloading = getattr(item, 'downloading', False)
+        # A session that started on a partial file stays a streaming session
+        # even if the download finished while we were playing. Trusting only
+        # item.downloading here used to cut the song mid-way and (in repeat
+        # mode) restart it from zero whenever the download completed right as
+        # ffmpeg drained its buffer.
+        if not downloading and not getattr(self, '_partial_launch', False):
+            return False  # a normal launch on a complete file
+        duration = getattr(item, 'duration', 0) or 0
         if ffmpeg_rc == 0 and self.read_pcm_size > 0:
-            duration = getattr(item, 'duration', 0) or 0
             if self.playhead >= duration - 2:
                 return False  # played to the (known) end already
             self.log.info("bot: streaming caught up with the download at "
                           "%.0fs, waiting for more data" % self.playhead)
-        else:
+        elif downloading:
             item.no_stream = True
             self.log.info("bot: streaming attempt failed (ffmpeg exit %s), "
                           "waiting for the full download" % ffmpeg_rc)
+        else:
+            # file is complete and this pass produced no meaningful audio (or
+            # reached the known end): the song is genuinely over
+            return False
         # keep the playhead; the wait_for_ready branch relaunches from it
         self.wait_for_ready = True
         self.song_start_at = -1
@@ -123,6 +135,11 @@ class PlayerMixin:
 
     def launch_music(self, music_wrapper, start_from=0):
         assert music_wrapper.is_ready() or music_wrapper.playable_from(start_from, 0)
+
+        # Remember whether this session started on a still-downloading file:
+        # _stream_rewait must not trust item.downloading alone, because the
+        # download can complete while ffmpeg is draining its last buffer.
+        self._partial_launch = not music_wrapper.is_ready()
 
         uri = music_wrapper.uri()
 

@@ -60,6 +60,9 @@ class FakePlaylist(list):
             return self[self.current_index]
         return False
 
+    def skip_current(self):
+        pass
+
     def remove(self, index):
         self.version += 1
         removed = self[index]

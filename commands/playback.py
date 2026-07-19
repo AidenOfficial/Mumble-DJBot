@@ -21,6 +21,7 @@ MODE_ALIASES = {
     "2": "repeat", "loop": "repeat", "repeat": "repeat",
     "3": "random", "rand": "random", "shuffle": "random", "random": "random",
     "4": "autoplay", "auto": "autoplay", "autoplay": "autoplay",
+    "5": "single", "single": "single", "loopone": "single", "loop1": "single",
 }
 
 
@@ -105,6 +106,7 @@ def cmd_skip(bot, user, text, command, parameter):
         except Exception:
             pass
 
+    var.playlist.skip_current()  # in single-loop mode, break out for one step
     if not bot.is_pause:
         bot.interrupt()
     else:

@@ -21,6 +21,8 @@ def get_playlist(mode, _list=None, _index=None):
             return OneshotPlaylist()
         elif mode == "repeat":
             return RepeatPlaylist()
+        elif mode == "single":
+            return SingleLoopPlaylist()
         elif mode == "random":
             return RandomPlaylist()
         elif mode == "autoplay":
@@ -30,6 +32,8 @@ def get_playlist(mode, _list=None, _index=None):
             return OneshotPlaylist().from_list(_list, index)
         elif mode == "repeat":
             return RepeatPlaylist().from_list(_list, index)
+        elif mode == "single":
+            return SingleLoopPlaylist().from_list(_list, index)
         elif mode == "random":
             return RandomPlaylist().from_list(_list, index)
         elif mode == "autoplay":
@@ -110,6 +114,11 @@ class BasePlaylist(list):
         with self.playlist_lock:
             if -1 <= index < len(self):
                 self.current_index = index
+
+    def skip_current(self):
+        # A user skip. Most modes don't care (next() already advances);
+        # single-loop overrides this to break out of the loop for one step.
+        pass
 
     def find(self, id):
         with self.playlist_lock:
@@ -393,6 +402,51 @@ class RepeatPlaylist(BasePlaylist):
                 index = (index + 1) % n
                 items.append(self[index])
             return items
+
+
+class SingleLoopPlaylist(BasePlaylist):
+    """Single-track loop: the current song plays again when it ends. A user
+    skip (chat !skip or the web skip button) advances to the next track -
+    wrapping around like repeat mode - and keeps looping there."""
+
+    def __init__(self):
+        super().__init__()
+        self.mode = "single"
+        self._advance_once = False
+
+    def skip_current(self):
+        with self.playlist_lock:
+            self._advance_once = True
+
+    def next(self):
+        with self.playlist_lock:
+            if len(self) == 0:
+                self.current_index = -1
+                return False
+
+            if self.current_index == -1:
+                self.current_index = 0
+            elif self._advance_once:
+                self.current_index = (self.current_index + 1) % len(self)
+            self._advance_once = False
+
+            return self[self.current_index]
+
+    def next_index(self):
+        with self.playlist_lock:
+            if len(self) == 0:
+                return False
+            return max(self.current_index, 0)
+
+    def next_item(self):
+        with self.playlist_lock:
+            if len(self) == 0:
+                return False
+            return self[max(self.current_index, 0)]
+
+    def upcoming_items(self, count):
+        # nothing else will play on its own - no point prefetching
+        return []
 
 
 class RandomPlaylist(BasePlaylist):

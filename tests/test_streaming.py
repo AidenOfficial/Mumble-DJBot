@@ -180,6 +180,36 @@ class StreamingTestCase(unittest.TestCase):
         self.player.playhead = 599
         self.assertFalse(self.player._stream_rewait(0))
 
+    # ---- download finishing mid-play (restart-from-zero regression) -------
+
+    def test_download_completing_midplay_still_rewaits(self):
+        # The session started on a partial file and the download completed
+        # right as ffmpeg drained its buffer. Trusting item.downloading alone
+        # used to advance the playlist here, cutting the song mid-way and (in
+        # repeat/single mode) restarting it from zero.
+        self.set_item(duration=600, progress=1.0, downloading=False, ready='yes')
+        self.player._partial_launch = True
+        self.player.read_pcm_size = 10000
+        self.player.playhead = 300
+        self.assertTrue(self.player._stream_rewait(0))
+        self.assertTrue(self.player.wait_for_ready)
+        self.assertFalse(self.item.no_stream)
+
+    def test_partial_launch_completed_file_true_end_advances(self):
+        self.set_item(duration=600, progress=1.0, downloading=False, ready='yes')
+        self.player._partial_launch = True
+        self.player.read_pcm_size = 10000
+        self.player.playhead = 599
+        self.assertFalse(self.player._stream_rewait(0))
+
+    def test_partial_launch_completed_file_no_audio_advances(self):
+        # a relaunch that produced nothing on a complete file: really over
+        self.set_item(duration=600, progress=1.0, downloading=False, ready='yes')
+        self.player._partial_launch = True
+        self.player.read_pcm_size = 0
+        self.player.playhead = 300
+        self.assertFalse(self.player._stream_rewait(0))
+
     def test_disabled_config_never_rewaits(self):
         var.config.set('bot', 'stream_while_downloading', 'False')
         self.set_item(duration=600, progress=0.2)

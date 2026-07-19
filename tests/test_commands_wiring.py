@@ -52,4 +52,5 @@ def test_register_all_commands_wires_everything():
 
 def test_mode_aliases_map_to_known_modes():
     from commands.playback import MODE_ALIASES
-    assert set(MODE_ALIASES.values()) <= {"one-shot", "repeat", "random", "autoplay"}
+    assert set(MODE_ALIASES.values()) <= {"one-shot", "repeat", "single", "random", "autoplay"}
+    assert MODE_ALIASES["single"] == "single"

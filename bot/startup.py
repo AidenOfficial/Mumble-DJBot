@@ -209,7 +209,7 @@ def main():
     else:
         playback_mode = var.config.get('bot', 'playback_mode')
 
-    if playback_mode in ["one-shot", "repeat", "random", "autoplay"]:
+    if playback_mode in ["one-shot", "repeat", "single", "random", "autoplay"]:
         var.playlist = media.playlist.get_playlist(playback_mode)
     else:
         raise KeyError(f"Unknown playback mode '{playback_mode}'")

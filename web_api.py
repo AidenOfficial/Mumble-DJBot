@@ -75,7 +75,7 @@ def _set_volume(value):
 
 def _set_mode(mode):
     """Same semantics as the legacy /post 'action' mode switches."""
-    if mode not in ('one-shot', 'repeat', 'random', 'autoplay'):
+    if mode not in ('one-shot', 'repeat', 'single', 'random', 'autoplay'):
         abort(400)
     if mode == 'random':
         if var.playlist.mode != 'random':
@@ -102,6 +102,7 @@ def _mark_current_skipped():
 def _skip():
     """Same semantics as the legacy /post action=next."""
     _mark_current_skipped()
+    var.playlist.skip_current()  # in single-loop mode, break out for one step
     if not var.bot.is_pause:
         var.bot.interrupt()
     else:

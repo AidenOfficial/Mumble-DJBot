@@ -29,7 +29,7 @@ function togglePlay() {
   control({ action: status.value.play ? 'pause' : 'resume' })
 }
 
-const MODES = ['one-shot', 'repeat', 'random', 'autoplay']
+const MODES = ['one-shot', 'repeat', 'single', 'random', 'autoplay']
 </script>
 
 <template>
