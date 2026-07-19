@@ -6,6 +6,7 @@ import html
 import magic
 import os
 import io
+import stat
 import sys
 import variables as var
 import zipfile
@@ -682,24 +683,36 @@ def clear_tmp_folder(path, size):
                     continue
     else:
         if get_size_folder(path=path) > size:
-            all_files = ""
-            for (path, dirs, files) in os.walk(path):
-                all_files = [os.path.join(path, file) for file in files]
-                # exclude invalid symlinks (linux)
-                all_files = [file for file in all_files if os.path.exists(file)]
-                all_files.sort(key=lambda x: os.path.getmtime(x))
+            # Snapshot (mtime, size, path) of the top-level download cache in
+            # one pass. Concurrent threads (parallel downloads, yt-dlp temp
+            # files, the cache cleaner) may delete files while we scan - a
+            # vanished file must be skipped, never crash the download thread.
+            # Subdirectories (e.g. spotify req_* caches) have their own
+            # pruning and are left alone.
+            entries = []
+            try:
+                names = os.listdir(path)
+            except OSError:
+                return
+            for name in names:
+                filename = os.path.join(path, name)
+                try:
+                    st = os.stat(filename)
+                except OSError:
+                    continue
+                if stat.S_ISREG(st.st_mode):
+                    entries.append((st.st_mtime, st.st_size, filename))
+            entries.sort()
             size_tp = 0
-            for idx, file in enumerate(all_files):
-                size_tp += os.path.getsize(file)
+            for idx, (_mtime, fsize, _fname) in enumerate(entries):
+                size_tp += fsize
                 if int(size_tp / (1024 * 1024)) > size:
                     log.info("Cleaning tmp folder")
-                    to_remove = all_files[:idx]
-                    print(to_remove)
-                    for f in to_remove:
+                    for (_m, _s, f) in entries[:idx]:
                         log.debug("Removing " + f)
                         try:
-                            os.remove(os.path.join(path, f))
-                        except (FileNotFoundError, OSError):
+                            os.remove(f)
+                        except OSError:
                             continue
                     return
 

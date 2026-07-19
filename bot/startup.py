@@ -33,6 +33,7 @@ def start_web_interface(addr, port):
         handler = logging.StreamHandler()
 
     werkzeug_logger.addHandler(handler)
+    werkzeug_logger.propagate = False  # avoid double-printing access logs
 
     interface.init_proxy()
     interface.web.env = 'development'
@@ -138,7 +139,9 @@ def main():
 
     util.set_logging_formatter(handler, bot_logger.level)
     bot_logger.addHandler(handler)
-    logging.getLogger("root").addHandler(handler)
+    # Don't propagate to the root logger: third-party imports sometimes give
+    # it a handler of its own, which used to print every bot line twice.
+    bot_logger.propagate = False
     var.bot_logger = bot_logger
 
     # ======================
