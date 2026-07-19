@@ -5,6 +5,8 @@ Pillow
 mutagen
 requests
 packaging
-pymumble @ git+https://codeberg.org/pymumble/pymumble@34c47212b0162a87baa5b74638d50f8ee45777bf
+# pymumble 2.0 is vendored (see vendor/README.md) so builds never depend on
+# reaching codeberg.org - the NAS network cannot clone from it reliably.
+./vendor/pymumble
 pyradios
 spotdl

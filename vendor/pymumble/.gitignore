@@ -1,0 +1,6 @@
+*.pyc
+.*.swp
+.idea
+test.py
+venv/
+docs/_build

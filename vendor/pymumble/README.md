@@ -1,0 +1,110 @@
+**NOTE**: pymumble is currently being reworked from a stateful application object to a *library* that can be used both as a traditional client and as an independent collection of mostly stateless functionality. The documentation is kept more or less up to date, but until 2.0.0 is released, nothing is stable.
+
+# pymumble - Python Mumble client library
+## Installation
+
+### Requirements
+
+[`opus`](https://repology.org/project/opus/packages) is required to send and receive audio.
+
+### Install with `pip`
+
+```sh
+pip install pymumble
+```
+
+### Install from git
+
+```sh
+git clone https://codeberg.org/pymumble/pymumble.git
+cd pymumble
+python -m venv venv
+. ./venv/bin/activate
+python -m pip install -e . --group dev
+```
+
+## Usage
+
+```python
+# /// script
+# dependencies = [
+#     "pymumble>=2",
+# ]
+# ///
+
+from mumble import Mumble
+from subprocess import PIPE, Popen
+
+with Mumble("127.0.0.1", "A Weedy Samaritan", debug=False) as m:
+    usernames = ", ".join(u["name"] for u in m.my_channel().get_users())
+    m.my_channel().send_text_message(
+        f"Hello, {usernames}. You're all Brian! You're all individuals!"
+    )
+
+    sound = Popen("ffmpeg -i audio.opus -ar 48000 -b:a 64k -f s16le -".split(), stdout=PIPE).stdout.read()
+    m.send_audio.add_sound(sound).wait()
+```
+
+## BREAKING CHANGES and updates in pymumble 2.0.0
+The following enhancements are included in pymumble 2.0.0:
+
+- Implement encrypted UDP audio & pings with AES-OCB2, compatible with the latest Mumble server.
+- Implement unencrypted UDP pings to retrieve extended server info before connecting.
+- Support the latest protocol version: 1.5.735.
+- Use `black` for formatting.
+- Send functional version string compatible with the latest Mumble server.
+- Support Python `with` statements.
+
+In order to bring pymumble up to date with modern python development practices, the following breaking changes have been introduced in version 2.0.0:
+
+- Rename the import path from `pymumble_py3` to simply `mumble`.
+- Drop support for legacy audio codecs.
+- Remove `Mumble.set_receive_sound()`, audio support is now enabled by default.
+  - To disable audio support and avoid importing `opuslib`, instantiate the `Mumble` object with `Mumble(enable_audio=False)`.
+  - To disable audio support after the object has been created set `m = Mumble(); m.enable_audio = False`. This will still import `opuslib`.
+- Remove the `Mumble` class getter/setter functions `set_application_string()`, `set_loop_rate()`, and `get_loop_rate()`. These parameters can be set in the `Mumble` object initializer and queried and changed by accessing the object's `application` and `loop_rate` public attributes.
+- Replace callback constants with a class interface. e.g., `Mumble.callbacks.set_callback(PYMUMBLE_CLBK_SOUNDRECEIVED, ...)` is now `Mumble.callbacks.sound_received.set_handler(...)`.
+- Rename all constants to drop the `PYMUMBLE_` prefix, some also renamed for clarity.
+- Rename `SoundOutput` to `SendAudio` and `SoundQueue` to `ReceivedAudioQueue`.
+
+Because pymumble now follows the [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) versioning scheme, any further breaking changes must increment the MAJOR version number. The dependency
+```
+pymumble>=2,<3
+```
+will resolve to the latest version with a stable API.
+
+## Goals
+
+We strive to keep pymumble up to date with the latest version of the mumble protocol and compatible with the mumble server. Pymumble should be bit-compatible with the official mumble client at the application/messaging layer. (The python & C++ protobuf implementations may vary in how they serialise the data over the wire, which is acceptable per the protocol buffer specification.)
+
+Future releases will focus on:
+
+- improving the API
+- improving performance
+- improving test coverage
+- improving documentation
+- rounding out protocol support
+
+## Contributing guidelines
+
+- Follow [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/#specification) guidelines for writing commit messages.
+- Document code in the [Sphinx docstring format](https://sphinx-rtd-tutorial.readthedocs.io/en/latest/docstrings.html).
+- Include integration tests for updated or new functionality.
+- Format code with `black` before committing.
+
+## Applications using `pymumble`
+
+- [Abot](https://github.com/ranomier/pymumble-abot)
+- [Botamusique](https://github.com/azlux/botamusique)
+- [MumbleRadioPlayer](https://github.com/azlux/MumbleRadioPlayer) (archived)
+- [MumbleRecbot](https://github.com/Robert904/mumblerecbot) (deprecated)
+
+## Thanks
+
+- [@azlux](https://github.com/azlux) for maintaining the `pymumble` library before version 2
+- [Jan Petykiewicz](https://github.com/anewusername) for the AES-OCB2 implementation
+- [Ranomier](https://github.com/ranomier) for the python3 port
+- [@raylu](https://github.com/raylu) for making `pymumble` speak into channels
+- [@schlarpc](https://github.com/schlarpc) for fixes on buffer
+- [@Robert904](https://github.com/Robert904) for the inital pymumble implementation
+- All contributors to the previous versions.
