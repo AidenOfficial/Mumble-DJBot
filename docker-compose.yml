@@ -40,7 +40,38 @@ services:
       # 需要时取消下面这行的注释。
       # - ./cookies:/botamusique/cookies
     # 机器人是"客户端",主动连出到 Mumble 服务器,无需映射端口。
-    # 以后启用 Web 界面时再加: ports: ["8181:8181"]
+    #
+    # Web 界面两种发布方式(configuration.ini 里 [webinterface] enabled=True,
+    # listening_addr=0.0.0.0):
+    #  1) 仅局域网直连:取消下面 ports 的注释。
+    #  2) 公网走 Cloudflare Tunnel + Access(推荐):**不要**开 ports,
+    #     用下面的 cloudflared 服务(见 deploy/WEBUI.md):
+    #       docker compose --profile tunnel up -d
+    # ports: ["8181:8181"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Cloudflare Tunnel:出站隧道把 Web 界面发布到公网,鉴权交给
+  # Cloudflare Access,8181 端口无需(也不应)暴露。
+  # 属于 "tunnel" profile —— 平时 `docker compose up -d` 不会启动它;
+  # 在 .env 写入 CLOUDFLARE_TUNNEL_TOKEN=<token> 后用:
+  #   docker compose --profile tunnel up -d
+  # Cloudflare 控制台里 Public hostname 的回源地址填 http://botamusique:8181
+  # (compose 服务名,同一默认网络内可直接解析)。
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: mumble-music-tunnel
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      # token 放同目录的 .env(已 gitignore):CLOUDFLARE_TUNNEL_TOKEN=eyJh...
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - botamusique
     logging:
       driver: json-file
       options:

@@ -27,35 +27,28 @@ listening_port = 8181
 is_web_proxified = True      ; 让 Flask 信任 X-Real-IP(经由 ReverseProxied)
 ```
 
-## docker compose(示例,与 deploy/DOCKER.md 的服务合并)
+## docker compose(已内置,tunnel profile)
 
-```yaml
-services:
-  botamusique:
-    build: .
-    restart: unless-stopped
-    volumes:
-      - ./configuration.ini:/botamusique/configuration.ini
-      - ./data:/botamusique/data
-    # 不发布 8181 端口:只让同网络的 cloudflared 访问
-    networks: [bot-net]
+cloudflared 服务**已经写在仓库根目录的 `docker-compose.yml` 里**,挂在
+`tunnel` profile 下,平时不启动。启用步骤:
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}   # 放 .env,不入库
-    networks: [bot-net]
-
-networks:
-  bot-net: {}
+```bash
+cd <部署目录>
+echo 'CLOUDFLARE_TUNNEL_TOKEN=eyJh...' > .env    # token 来自 Cloudflare 控制台
+docker compose --profile tunnel up -d            # bot + cloudflared 一起拉起
+docker compose logs -f cloudflared               # 看到 "Registered tunnel connection" 即通
 ```
+
+- 不加 `--profile tunnel` 时行为与从前完全一致(只起 bot)。
+- 不要给 bot 服务开 `ports`:两个容器在同一 compose 默认网络里,
+  cloudflared 用服务名直接回源,8181 不暴露给宿主机/公网。
+- `.env` 已被 gitignore,token 不会入库。
 
 ## Cloudflare 侧步骤(Zero Trust 控制台)
 
-1. **Tunnel**:Networks → Tunnels → Create tunnel,拿到 token 填入 `.env`;
-   Public hostname 指到 `http://botamusique:8181`(compose 服务名)。
+1. **Tunnel**:Networks → Tunnels → Create tunnel(Cloudflared 类型),
+   复制 token 写进 `.env`;Public hostname 的回源 Service 填
+   `http://botamusique:8181`(compose 服务名)。
 2. **Access 应用**:Access → Applications → Self-hosted,域名同上;
    策略按邮箱/组放行;Session 时长按需(如 24h)。
 3. (可选)Access → Service Auth 为自动化脚本发 Service Token。
