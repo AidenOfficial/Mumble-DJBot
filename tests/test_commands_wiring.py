@@ -38,7 +38,7 @@ def test_register_all_commands_wires_everything():
     bot = FakeBot()
     commands.register_all_commands(bot)
     # a representative sample across every split module
-    for expected in ("play", "file", "spotify", "bili", "volume", "duck",
+    for expected in ("play", "file", "spotify", "bili", "live", "volume", "duck",
                      "queue", "skip", "tag", "search", "kill", "update",
                      "web", "mode", "shortlist"):
         assert any(expected in name for name in bot.registered), \

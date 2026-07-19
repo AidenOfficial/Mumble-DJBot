@@ -19,6 +19,50 @@ class PlayerMixin:
     # queue cannot saturate bandwidth or disk.
     PREFETCH_MAX_CONCURRENT = 2
 
+    # Consecutive dead reconnect attempts before a live stream is given up on.
+    LIVESTREAM_MAX_RETRIES = 3
+
+    def _livestream_retry(self, ffmpeg_rc):
+        """Live streams drop for reasons that have nothing to do with the
+        broadcast being over (expired segment URLs, network hiccups). Return
+        True to relaunch the current livestream item - uri() resolves a fresh
+        stream URL - instead of letting the loop discard it as a dead track."""
+        if var.playlist.current_index == -1:
+            return False
+        current = var.playlist.current_item()
+        if not current:
+            return False
+        try:
+            item = current.item()
+        except Exception:
+            return False
+        if getattr(item, 'type', '') != 'livestream':
+            return False
+
+        channels = 2 if self.stereo else 1
+        played_secs = self.read_pcm_size / 2.0 / 48000 / channels
+        if ffmpeg_rc == 0 and played_secs >= 10:
+            return False  # the broadcast simply ended - move on
+
+        if getattr(self, '_live_retry_id', None) != item.id:
+            self._live_retry_id = item.id
+            self._live_retries = 0
+        if played_secs >= 10:
+            self._live_retries = 0  # mid-play drop, not a dead stream
+        self._live_retries += 1
+        if self._live_retries > self.LIVESTREAM_MAX_RETRIES:
+            return False
+
+        self.log.info("bot: live stream dropped (ffmpeg exit %s after %.0fs), "
+                      "reconnecting (attempt %d/%d)", ffmpeg_rc, played_secs,
+                      self._live_retries, self.LIVESTREAM_MAX_RETRIES)
+        # a reconnect is not a new play - keep it out of the statistics
+        self._skip_history_once = True
+        self.playhead = 0
+        self.song_start_at = -1
+        self.wait_for_ready = True
+        return True
+
     # =======================
     #   Launch and Download
     # =======================
@@ -85,8 +129,11 @@ class PlayerMixin:
         self.log.info("bot: play music " + music_wrapper.format_debug_string())
 
         # Statistics: one history row per playback start (a start_from > 0
-        # is a resume or a stream-while-downloading relaunch, not a play).
-        if start_from == 0 and var.play_history is not None:
+        # is a resume or a stream-while-downloading relaunch, not a play;
+        # _skip_history_once marks a livestream reconnect).
+        skip_history = getattr(self, '_skip_history_once', False)
+        self._skip_history_once = False
+        if start_from == 0 and not skip_history and var.play_history is not None:
             try:
                 item = music_wrapper.item()
                 var.play_history.record(
@@ -437,6 +484,13 @@ class PlayerMixin:
             # advancing (or misreading the early EOF as a decode failure).
             if ffmpeg_rc is not None and self._stream_rewait(ffmpeg_rc):
                 self.last_ffmpeg_err = ""
+                return
+
+            # A live stream dying mid-play (segment URL expired, network
+            # hiccup) is not a bad file: re-resolve the stream URL and
+            # relaunch, up to a few consecutive dead starts in a row.
+            if ffmpeg_rc is not None and ffmpeg_rc not in (-9, -15) \
+                    and self._livestream_retry(ffmpeg_rc):
                 return
 
             # A non-zero ffmpeg exit code that we didn't cause ourselves

@@ -59,7 +59,7 @@ from .sources import (
     cmd_yt_play,
     cmd_yt_search,
 )
-from .streaming import cmd_play_bilibili, cmd_play_spotify
+from .streaming import cmd_play_bilibili, cmd_play_live, cmd_play_spotify
 from .volume import (
     cmd_ducking,
     cmd_ducking_delay,
@@ -97,6 +97,7 @@ def register_all_commands(bot):
     bot.register_command(commands('play_tag'), cmd_play_tags)
     bot.register_command(commands('play_url'), cmd_play_url)
     bot.register_command(commands('play_bilibili'), cmd_play_bilibili)
+    bot.register_command(commands('play_live'), cmd_play_live)
     bot.register_command(commands('play_spotify'), cmd_play_spotify)
     bot.register_command(commands('queue'), cmd_queue)
     bot.register_command(commands('random'), cmd_random)

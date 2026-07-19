@@ -5,6 +5,7 @@ import time
 from constants import tr_cli as tr
 import util
 import variables as var
+import media.livestream
 import media.playlist
 from media.cache import get_cached_wrapper_from_scrap
 
@@ -43,6 +44,48 @@ def cmd_play_bilibili(bot, user, text, command, parameter):
             bot.async_download_next()
     else:
         bot.send_msg(tr('bad_parameter', command=command), text)
+
+
+def _enqueue_live(bot, user, url, title, text):
+    music_wrapper = get_cached_wrapper_from_scrap(
+        type='livestream', url=url, title=title, user=user)
+    var.playlist.append(music_wrapper)
+    log.info("cmd: add to playlist: " + music_wrapper.format_debug_string())
+    send_item_added_message(bot, music_wrapper, len(var.playlist) - 1, text)
+
+
+def cmd_play_live(bot, user, text, command, parameter):
+    """!live <url | keywords> - queue a live audio stream (YouTube etc.).
+
+    With a URL the stream is queued directly (validated in the download
+    thread). With keywords, a background thread searches YouTube for a
+    currently-live stream and queues the first hit - handy when you have no
+    idea what to listen to."""
+    parameter = parameter.strip()
+    if not parameter:
+        bot.send_msg(tr('bad_parameter', command=command), text)
+        return
+
+    url = util.get_url_from_input(parameter)
+    if url:
+        _enqueue_live(bot, user, url, '', text)
+        return
+
+    # keyword search hits the network - never block the mumble loop thread
+    bot.send_msg(tr('live_searching', query=parameter), text)
+
+    def search_and_enqueue():
+        try:
+            lives = media.livestream.search_live_streams(parameter)
+        except Exception:
+            log.exception("cmd: live stream search failed")
+            lives = []
+        if not lives:
+            bot.send_channel_msg(tr('live_no_match', query=parameter))
+            return
+        _enqueue_live(bot, user, lives[0]['url'], lives[0]['title'], text)
+
+    threading.Thread(target=search_and_enqueue, name="LiveSearch", daemon=True).start()
 
 
 # --- Spotify playlist lazy-loading -------------------------------------------
