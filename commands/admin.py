@@ -35,13 +35,13 @@ def cmd_url_ban(bot, user, text, command, parameter):
     if url:
         _id = item_id_generators['url'](url=url)
         var.cache.free_and_delete(_id)
-        var.playlist.remove_by_id(_id)
+        bot.drop_from_queue(_id)
     else:
         if var.playlist.current_item() and var.playlist.current_item().type == 'url':
             item = var.playlist.current_item().item()
             url = item.url
             var.cache.free_and_delete(item.id)
-            var.playlist.remove_by_id(item.id)
+            bot.drop_from_queue(item.id)
         else:
             bot.send_msg(tr('bad_parameter', command=command), text)
             return

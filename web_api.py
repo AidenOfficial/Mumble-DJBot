@@ -160,22 +160,11 @@ def _queue_move(src, dst):
 
 
 def _queue_remove(index):
-    """Same semantics as the legacy /post delete_music."""
+    """Remove the index-th queue item; shared with chat !rm and the legacy /post."""
     playlist = var.playlist
     if not (0 <= index < len(playlist)):
         abort(400)
-    if index == playlist.current_index:
-        playlist.remove(index)
-        if index < len(playlist):
-            if not var.bot.is_pause:
-                var.bot.interrupt()
-                playlist.current_index -= 1
-        else:
-            playlist.current_index -= 1
-            if not var.bot.is_pause:
-                var.bot.interrupt()
-    else:
-        playlist.remove(index)
+    var.bot.remove_from_queue(index)
 
 
 def create_blueprint(requires_auth):

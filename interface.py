@@ -465,21 +465,7 @@ def post():
             if len(var.playlist) >= int(payload['delete_music']):
                 index = int(payload['delete_music'])
 
-                if index == var.playlist.current_index:
-                    var.playlist.remove(index)
-
-                    if index < len(var.playlist):
-                        if not var.bot.is_pause:
-                            var.bot.interrupt()
-                            var.playlist.current_index -= 1
-                            # then the bot will move to next item
-
-                    else:  # if item deleted is the last item of the queue
-                        var.playlist.current_index -= 1
-                        if not var.bot.is_pause:
-                            var.bot.interrupt()
-                else:
-                    var.playlist.remove(index)
+                var.bot.remove_from_queue(index)
 
         elif 'play_music' in payload:
             music_wrapper = var.playlist[int(payload['play_music'])]
@@ -495,7 +481,7 @@ def post():
 
         elif 'delete_item_from_library' in payload:
             _id = payload['delete_item_from_library']
-            var.playlist.remove_by_id(_id)
+            var.bot.drop_from_queue(_id)
             item = var.cache.get_item_by_id(_id)
 
             if os.path.isfile(item.uri()):
@@ -686,7 +672,7 @@ def library():
                 if var.config.getboolean("bot", "delete_allowed"):
                     items = dicts_to_items(var.music_db.query_music(condition))
                     for item in items:
-                        var.playlist.remove_by_id(item.id)
+                        var.bot.drop_from_queue(item.id)
                         item = var.cache.get_item_by_id(item.id)
 
                         if os.path.isfile(item.uri()):

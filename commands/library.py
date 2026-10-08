@@ -275,7 +275,7 @@ def cmd_delete_from_library(bot, user, text, command, parameter):
                     music_wrapper = get_cached_wrapper_by_id(music_dict['id'], user)
                     log.info("cmd: remove from library: " + music_wrapper.format_debug_string())
                     msgs.append("<li>[{}] <b>{}</b></li>".format(music_wrapper.item().type, music_wrapper.item().title))
-                    var.playlist.remove_by_id(music_dict['id'])
+                    bot.drop_from_queue(music_dict['id'])
                     var.cache.free_and_delete(music_dict['id'])
                     count += 1
             else:
@@ -297,7 +297,7 @@ def cmd_delete_from_library(bot, user, text, command, parameter):
                 music_wrapper = get_cached_wrapper_by_id(music_dict['id'], user)
                 bot.send_msg(tr('file_deleted', item=music_wrapper.format_song_string()), text)
                 log.info("cmd: remove from library: " + music_wrapper.format_debug_string())
-                var.playlist.remove_by_id(music_dict['id'])
+                bot.drop_from_queue(music_dict['id'])
                 var.cache.free_and_delete(music_dict['id'])
                 return
 

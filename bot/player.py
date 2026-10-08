@@ -206,6 +206,7 @@ class PlayerMixin:
         # _stream_rewait must not trust item.downloading alone, because the
         # download can complete while ffmpeg is draining its last buffer.
         self._partial_launch = not music_wrapper.is_ready()
+        self._kick_id = None
 
         uri = music_wrapper.uri()
 
@@ -389,6 +390,62 @@ class PlayerMixin:
             self.send_channel_msg(
                 tr('download_in_progress', item=item.format_title()))
 
+    # 等待分支最多替同一首补发几次下载;再不行就当它失败,免得无限重来
+    MAX_DOWNLOAD_KICKS = 3
+
+    def _ensure_downloading(self, wrapper):
+        """主循环在等当前曲,却没有线程在下载它时补发下载。
+
+        暂停中连按跳过超出预取范围、清空后重加同一链接、缓存被手动删掉之类的
+        情况都会走到这里;以前主循环只会一直等下去,!skip 也救不回来。"""
+        try:
+            item = wrapper.item()
+        except Exception:
+            return
+        with self._download_lock:
+            # 只认下载线程登记:item.downloading 可能因为异常一直停在 True,
+            # 那样补发几次后会被判失败,而不是永远等下去
+            if wrapper.id in self._active_downloads:
+                return
+
+        if getattr(self, '_kick_id', None) != wrapper.id:
+            self._kick_id, self._kick_count = wrapper.id, 0
+        if self._kick_count >= self.MAX_DOWNLOAD_KICKS:
+            # 补发了几次还是没就绪(也没报失败):交给 is_failed 分支移出队列
+            self.log.warning("bot: %s still not ready after %d download attempts, giving up",
+                             wrapper.id[:7], self._kick_count)
+            self.send_channel_msg(tr('unable_download', item=self._safe_title(wrapper)))
+            item.ready = 'failed'
+            return
+        self._kick_count += 1
+        self.log.info("bot: nothing is downloading the current item %s, starting it", wrapper.id[:7])
+        self.async_download(wrapper)
+
+    def drop_from_queue(self, item_id):
+        """播放 / 下载 / 校验失败时把这首(含重复条目)移出队列。
+
+        主循环没在等这首时(正在播或刚播完),接下来它会 next();删掉当前曲后
+        指针已经指向原来的下一首,要让那次 next() 原地不动,否则下一首会被
+        跳过(one-shot 模式下是直接被删掉)。"""
+        var.playlist.remove_by_id(item_id, rewind=not self.wait_for_ready)
+
+    def remove_from_queue(self, index):
+        """用户删除队列第 index 首(聊天 !rm、Web 队列)。返回被删的条目。"""
+        playlist = var.playlist
+        if index != playlist.current_index:
+            return playlist.remove(index)
+
+        removed = playlist.remove_current(rewind=not self.wait_for_ready)
+        if not self.is_pause:
+            if self.wait_for_ready:
+                # 还在等它下载:原来的下一首直接成为当前曲,开始准备它
+                current = playlist.current_item()
+                if current:
+                    self.start_download(current)
+            else:
+                self.interrupt()  # 停掉正在放的,主循环随后 next() 落到原来的下一首
+        return removed
+
     def _download(self, item):
         try:
             ver = item.version
@@ -399,7 +456,7 @@ class PlayerMixin:
                     return True
             except ValidationFailedError as e:
                 self.send_channel_msg(e.msg)
-                var.playlist.remove_by_id(item.id)
+                self.drop_from_queue(item.id)
                 var.cache.free_and_delete(item.id)
                 return False
             except Exception:
@@ -407,7 +464,7 @@ class PlayerMixin:
                 # 不能让下载线程带着异常死掉。
                 self.log.exception("bot: unexpected error while validating %s", item.id)
                 self.send_channel_msg(tr('unable_download', item=self._safe_title(item)))
-                var.playlist.remove_by_id(item.id)
+                self.drop_from_queue(item.id)
                 return False
 
             try:
@@ -746,7 +803,7 @@ class PlayerMixin:
                     if self.last_ffmpeg_err:
                         self.log.error("bot: ffmpeg said: %s", self.last_ffmpeg_err)
                     self.send_channel_msg(tr('unable_play', item=current.format_title()))
-                    var.playlist.remove_by_id(current.id)
+                    self.drop_from_queue(current.id)
                     var.cache.free_and_delete(current.id)
             self.last_ffmpeg_err = ""
 
@@ -765,7 +822,7 @@ class PlayerMixin:
 
                     except ValidationFailedError as e:
                         self.send_channel_msg(e.msg)
-                        var.playlist.remove_by_id(current.id)
+                        self.drop_from_queue(current.id)
                         var.cache.free_and_delete(current.id)
                 else:
                     self._loop_status = 'Empty queue'
@@ -782,8 +839,9 @@ class PlayerMixin:
                         self.last_volume_cycle_time = time.time()
                         self.async_download_next()
                     elif current.is_failed():
-                        var.playlist.remove_by_id(current.id)
+                        # 先退出等待,drop_from_queue 才知道接下来要 next()
                         self.wait_for_ready = False
+                        self.drop_from_queue(current.id)
                     elif self._stream_playable(current):
                         # enough of the download is on disk: start playing
                         # from the playhead while yt-dlp keeps writing
@@ -796,6 +854,7 @@ class PlayerMixin:
                         # item is still downloading, don't compete with it
                     else:
                         self._loop_status = 'Wait for the next item to be ready'
+                        self._ensure_downloading(current)
                 else:
                     self.wait_for_ready = False
 
@@ -889,6 +948,8 @@ class PlayerMixin:
             var.playlist.point_to(index)
 
         current = var.playlist.current_item()
+        if not current:
+            return
 
         self.start_download(current)
         self.is_pause = False

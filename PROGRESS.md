@@ -180,6 +180,28 @@ pyflakes、真实 ffmpeg、桩后端 + Playwright 截图/交互。
 3. SponsorBlock:放一个带片头说话的 MV,确认跳过时没有卡顿/重复播报。
 4. `!bind`:在 Mumble 里私聊 bot 完成绑定,`!mylist` / `!fav` 正常。
 
+## 第四轮(2026-10-08):代码审计第一批修复
+
+审计报告在分支 `claude/quirky-fermi-6nou7s` 的 `audit/`。本轮修报告优先级第 3–6、13 项:
+
+- **H5 等待态补发下载**(PC-13):主循环等当前曲、却没有线程在下载它时补发下载;同一首补发 3 次
+  仍不就绪就当失败移出队列。覆盖暂停中连跳超出预取范围、清空后重加同一链接、缓存被删等路径。
+- **H6 下载中不再被二次校验删文件**(PC-01):`URLItem.validate()` 在 `preparing`/`downloading` 时直接返回。
+- **H7 失败后不再吞掉下一首**(PC-02/03/14/15):`remove_by_id` 倒序删、全程持锁;删掉当前曲后用
+  "下一次 next() 原地不动"标记代替退指针(one-shot 下退到 -1 会被 Web 轮询改回 0,下一首随即被删);
+  `!rm`、Web 队列删除、旧 `/post` 三份重复逻辑合并为 `remove_from_queue`;`current_item()` 在指针
+  -1/越界时返回 False(以前返回队尾那首或抛 IndexError)。
+- **H8**:`!filematch`/`!listfile` 改为不区分大小写的字面量匹配(`re.escape`),不再执行用户正则。
+- **CCD-02**:`!repeat` 上限 20。
+- **T1/T2**:test_play_history、test_livestream 不再依赖别的测试文件泄漏的全局状态。
+- 回归测试 `tests/test_queue_integrity.py`(19 条,修复前的代码上除两条护栏外全部失败)。测试 272 个全部通过,
+  单文件逐个跑、倒序跑也全过。
+
+### 待本机复验(第四轮)
+1. 播一首坏链接 + 两首好歌(one-shot 和 repeat 各一次):坏的跳过后放的是紧接着那首。
+2. 长视频边下边播时 `!repeat`:不中断、不卡在"等待准备"。
+3. 暂停时连按 3 次以上 `!skip` 再 `!play`:能开始下载并播放。
+
 ## DECISIONS 待决区
 
 ### ⚠️ push 被 403 拒绝(需要用户处理)
