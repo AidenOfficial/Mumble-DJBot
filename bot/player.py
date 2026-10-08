@@ -171,12 +171,24 @@ class PlayerMixin:
         channels = 2 if self.stereo else 1
         self.pcm_buffer_size = 960 * channels
 
-        command = ["ffmpeg", '-v', ffmpeg_debug, '-nostdin', '-i', uri, '-ss', f"{start_from:f}",
-                   # Decode audio only. Without this, ffmpeg may try to handle a
-                   # video / cover-art stream from a container (mp4/mkv, or a
-                   # YouTube/Bilibili "best" format) and fail to produce PCM -
-                   # which used to take playback (and sometimes the bot) down.
-                   '-vn', '-map', '0:a:0?']
+        command = ["ffmpeg", '-v', ffmpeg_debug, '-nostdin']
+        if str(uri).lower().startswith(('http://', 'https://')):
+            # 网络流(电台/直播):卡住时让 ffmpeg 自己超时退出、自动重连,
+            # 而不是让主循环永远阻塞在 stdout.read 上,最后被看门狗判死重启。
+            command += ['-reconnect', '1', '-reconnect_streamed', '1',
+                        '-reconnect_delay_max', '10', '-rw_timeout', '30000000']
+        if start_from > 0:
+            # 输入端 seek(-ss 放在 -i 之前):由解复用器直接跳转。
+            # 以前 -ss 放在 -i 之后,ffmpeg 要把前面的音频全部解码 + loudnorm
+            # 再丢掉;长视频恢复播放/拖动进度到 2 小时处要卡几十秒到几分钟,
+            # 主循环阻塞超过 watchdog_timeout 就被判定卡死,整个进程退出。
+            command += ['-ss', f"{start_from:f}"]
+        command += ['-i', uri,
+                    # Decode audio only. Without this, ffmpeg may try to handle a
+                    # video / cover-art stream from a container (mp4/mkv, or a
+                    # YouTube/Bilibili "best" format) and fail to produce PCM -
+                    # which used to take playback (and sometimes the bot) down.
+                    '-vn', '-map', '0:a:0?']
 
         # Loudness normalization (EBU R128): keeps loud and quiet tracks at a
         # consistent volume so the bot can serve as background music without
@@ -305,6 +317,13 @@ class PlayerMixin:
                 var.playlist.remove_by_id(item.id)
                 var.cache.free_and_delete(item.id)
                 return False
+            except Exception:
+                # yt-dlp / 网站返回的意外数据(时长为 None 等)只算这一首失败,
+                # 不能让下载线程带着异常死掉。
+                self.log.exception("bot: unexpected error while validating %s", item.id)
+                self.send_channel_msg(tr('unable_download', item=self._safe_title(item)))
+                var.playlist.remove_by_id(item.id)
+                return False
 
             try:
                 item.prepare()
@@ -314,11 +333,32 @@ class PlayerMixin:
             except PreparationFailedError as e:
                 self.send_channel_msg(e.msg)
                 return False
+            except Exception:
+                self.log.exception("bot: unexpected error while downloading %s", item.id)
+                self.send_channel_msg(tr('unable_download', item=self._safe_title(item)))
+                try:
+                    item.item().ready = 'failed'
+                except Exception:
+                    pass
+                return False
         finally:
             with self._download_lock:
                 self._active_downloads.discard(item.id)
 
+    @staticmethod
+    def _safe_title(wrapper):
+        try:
+            return wrapper.format_title()
+        except Exception:
+            return getattr(wrapper, 'id', '?')
+
     def _download_progress_reporter(self, wrapper):
+        try:
+            self._report_download_progress(wrapper)
+        except Exception:
+            self.log.debug("bot: download progress reporter failed", exc_info=True)
+
+    def _report_download_progress(self, wrapper):
         # Announce download progress in chat, but only for downloads slow
         # enough to matter (e.g. a multi-hour video). Short downloads finish
         # within the grace period and produce no messages at all.
@@ -384,6 +424,7 @@ class PlayerMixin:
         while not self.exit and self.mumble.is_alive():
             self.last_loop_at = time.time()
             self._write_heartbeat()
+            self._autosave_playlist()
             try:
                 self._loop_iteration()
             except Exception:
@@ -414,6 +455,24 @@ class PlayerMixin:
                     and var.config.get("bot", "save_music_library"):
                 self.log.info("bot: save playlist into database")
                 var.playlist.save()
+
+    def _autosave_playlist(self):
+        # 队列以前只在正常退出时保存:一旦崩溃/被看门狗重启,整条队列就丢了。
+        # 现在队列有变化就每 15 秒落盘一次(写几行 sqlite,开销可忽略)。
+        now = time.time()
+        if now - getattr(self, '_last_playlist_save', 0.0) < 15:
+            return
+        self._last_playlist_save = now
+        if not var.config.getboolean('bot', 'save_playlist', fallback=True):
+            return
+        version = (id(var.playlist), var.playlist.version, var.playlist.current_index)
+        if version == getattr(self, '_saved_playlist_version', None):
+            return
+        try:
+            var.playlist.save()
+            self._saved_playlist_version = version
+        except Exception:
+            self.log.debug("bot: playlist autosave failed", exc_info=True)
 
     def _write_heartbeat(self):
         # Touch a heartbeat file every few seconds so an external healthcheck
@@ -700,8 +759,9 @@ class PlayerMixin:
         self.interrupt()
         self.is_pause = True
         self.song_start_at = -1
-        if len(var.playlist) > 0:
-            self.pause_at_id = var.playlist.current_item().id
+        current = var.playlist.current_item() if len(var.playlist) > 0 else None
+        if current:
+            self.pause_at_id = current.id
             self.log.info(f"bot: music paused at {self.playhead:.2f} seconds.")
 
     def resume(self):

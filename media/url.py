@@ -130,12 +130,15 @@ class URLItem(BaseItem):
 
     # Run in a other thread
     def prepare(self):
-        if not self.downloading:
-            assert self.ready == 'validated'
-            return self._download()
-        else:
-            assert self.ready == 'yes'
+        # 以前这里是两个 assert:清理线程把 ready 从 yes 改回 validated、
+        # 或上一次下载失败留下 failed 时,AssertionError 会直接打死下载线程。
+        if self.is_ready():
             return True
+        if self.downloading:
+            return True  # 另一个线程正在下载,主循环会轮询 is_ready()
+        if self.ready != 'validated':
+            self.validate()
+        return self._download()
 
     def _get_info_from_url(self):
         self.log.info("url: fetching metadata of url %s " % self.url)
@@ -157,15 +160,23 @@ class URLItem(BaseItem):
             for i in range(attempts):
                 try:
                     info = ydl.extract_info(self.url, download=False)
-                    self.duration = info['duration']
-                    self.title = info['title'].strip()
-                    self.keywords = self.title
-                    succeed = True
-                    return True
                 except youtube_dl.utils.DownloadError:
-                    pass
-                except KeyError:  # info has no 'duration'
-                    break
+                    continue
+                except Exception:
+                    self.log.warning("url: metadata extraction crashed for %s", self.url, exc_info=True)
+                    continue
+                if not info:
+                    continue
+                # 直播/首映/部分 B 站条目没有时长或标题,yt-dlp 给 None;
+                # 以前直接拿 None 去和 max_duration 比较,TypeError 打死线程。
+                try:
+                    self.duration = int(info.get('duration') or 0)
+                except (TypeError, ValueError):
+                    self.duration = 0
+                self.title = str(info.get('title') or self.url).strip()
+                self.keywords = self.title
+                succeed = True
+                return True
 
         if not succeed:
             self.ready = 'failed'
@@ -274,7 +285,10 @@ class URLItem(BaseItem):
                 return True
             else:
                 for f in glob.glob(base_path + "*"):
-                    os.remove(f)
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass  # 清理线程可能已经删掉了
                 self.ready = "failed"
                 self.downloading = False
                 raise PreparationFailedError(tr('unable_download', item=self.format_title()))
@@ -294,9 +308,13 @@ class URLItem(BaseItem):
             self.progress = 1.0
 
     def _read_thumbnail_from_file(self, path_thumbnail):
-        if os.path.isfile(path_thumbnail):
-            im = Image.open(path_thumbnail)
-            self.thumbnail = self._prepare_thumbnail(im)
+        # 封面坏了不影响播放,别让 PIL 的异常把"下载成功"变成崩溃
+        try:
+            if os.path.isfile(path_thumbnail):
+                im = Image.open(path_thumbnail)
+                self.thumbnail = self._prepare_thumbnail(im)
+        except Exception:
+            self.log.debug("url: could not read thumbnail %s", path_thumbnail, exc_info=True)
 
     def _prepare_thumbnail(self, im):
         im.thumbnail((100, 100), Image.LANCZOS)

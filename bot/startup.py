@@ -246,19 +246,24 @@ def main():
     # ============================
     #   Crash safety / watchdog
     # ============================
-    # In Python an unhandled exception in a worker thread silently kills only
-    # that thread, leaving a half-dead "zombie" bot that no restart policy can
-    # detect. Turn such failures into a loud process exit so the supervisor
-    # (systemd / Docker restart policy) can bring a fresh bot back.
+    # 未捕获的线程异常:以前一律 os._exit(1),结果下载/校验/进度播报这类
+    # 一次性工作线程的任何小错误(yt-dlp 返回 None 时长、发消息时恰好断线……)
+    # 都会把整个 bot 带走,这正是线上反复"崩溃重启"的主因。
+    # 现在只记录日志;只有 Web 服务线程死掉才退出进程让 Docker 拉起
+    # (Mumble 线程断开时主循环自己会退出,不需要这里兜底)。
+    fatal_threads = {"WebThread"}
     if hasattr(threading, "excepthook"):
         def _thread_excepthook(args):
             if args.exc_type is SystemExit:
                 return
+            name = args.thread.name if args.thread else "?"
+            fatal = name in fatal_threads
             bot_logger.critical(
-                "bot: unhandled exception in thread %s, exiting for restart",
-                args.thread.name if args.thread else "?",
+                "bot: unhandled exception in thread %s%s", name,
+                ", exiting for restart" if fatal else " (thread dropped, bot keeps running)",
                 exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
-            os._exit(1)
+            if fatal:
+                os._exit(1)
         threading.excepthook = _thread_excepthook
 
     # Watchdog: if the main playback loop stops making progress (e.g. a stuck

@@ -28,6 +28,9 @@ class MumbleBot(PlayerMixin):
         self.log = logging.getLogger("bot")
         self.log.info(f"bot: botamusique version {self.get_version()}, starting...")
         signal.signal(signal.SIGINT, self.ctrl_caught)
+        # docker stop / restart 发的是 SIGTERM:默认处理会直接杀进程,
+        # 队列来不及落盘。按 Ctrl-C 同样的路径优雅退出。
+        signal.signal(signal.SIGTERM, self.ctrl_caught)
         self.cmd_handle = {}
 
         self.stereo = var.config.getboolean('bot', 'stereo')
@@ -295,6 +298,14 @@ class MumbleBot(PlayerMixin):
 
     # All text send to the chat is analysed by this function
     def message_received(self, text):
+        # 运行在 pymumble 的回调线程里:任何异常(例如发送者刚好下线导致
+        # users[actor] KeyError)都不能冒泡出去拖垮连接线程。
+        try:
+            self._handle_message(text)
+        except Exception:
+            self.log.exception("bot: failed to handle a text message")
+
+    def _handle_message(self, text):
         raw_message = text.message.strip()
         message = re.sub(r'<.*?>', '', raw_message)
         if text.actor == 0:
@@ -383,15 +394,23 @@ class MumbleBot(PlayerMixin):
                 self.log.error(f"bot: command {command_exc} failed with error: {error_traceback}\n")
                 self.send_msg(tr('error_executing_command', command=command_exc, error=error), text)
 
+    # 发消息从不抛异常:它被下载线程、进度播报、校验线程等到处调用,
+    # 断线重连期间 users/channels 查找会 KeyError,不能因此弄死调用方。
     def send_msg(self, msg, text):
-        msg = msg.encode('utf-8', 'ignore').decode('utf-8')
-        # text if the object message, contain information if direct message or channel message
-        self.mumble.users[text.actor].send_text_message(msg)
+        try:
+            msg = msg.encode('utf-8', 'ignore').decode('utf-8')
+            # text if the object message, contain information if direct message or channel message
+            self.mumble.users[text.actor].send_text_message(msg)
+        except Exception:
+            self.log.warning("bot: could not send private message", exc_info=True)
 
     def send_channel_msg(self, msg):
-        msg = msg.encode('utf-8', 'ignore').decode('utf-8')
-        own_channel = self.mumble.channels[self.mumble.users.myself.channel_id]
-        own_channel.send_text_message(msg)
+        try:
+            msg = msg.encode('utf-8', 'ignore').decode('utf-8')
+            own_channel = self.mumble.channels[self.mumble.users.myself.channel_id]
+            own_channel.send_text_message(msg)
+        except Exception:
+            self.log.warning("bot: could not send channel message", exc_info=True)
 
     @staticmethod
     def is_admin(user):
@@ -420,6 +439,12 @@ class MumbleBot(PlayerMixin):
 
 
     def users_changed(self, user, message):
+        try:
+            self._users_changed()
+        except Exception:
+            self.log.exception("bot: error while reacting to a channel user change")
+
+    def _users_changed(self):
         # only check if there is one more user currently in the channel
         # else when the music is paused and somebody joins, music would start playing again
         user_count = self.get_user_count_in_channel()
