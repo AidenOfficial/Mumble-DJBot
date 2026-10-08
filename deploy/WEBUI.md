@@ -154,6 +154,16 @@ access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
   断网会自动续传;单文件上限 `max_upload_file_size`(默认 4G)。视频默认只保留音轨
   (`upload_extract_audio`),上传完直接进曲库,不用 rescan。
 
+## 界面语言(i18n)
+
+右上角下拉可切换 English / 简体中文 / 日本語,选择存在浏览器 localStorage(`lang`)。
+没选过时按浏览器语言自动匹配(zh-* → 简体中文,ja-* → 日本語,其余 English)。
+只影响 Web UI;bot 在 Mumble 里的回复仍由 `[bot] language` 决定。
+
+文案在 `webui/src/i18n/`:`en.ts` 是基准,`zh-CN.ts`、`ja.ts` 必须有同样的 key
+(缺 key 时 `npm run build` 的类型检查直接报错)。加新语言:复制一份语言包,在
+`i18n/index.ts` 的 `LOCALES` / `MESSAGES` / `detect()` 里登记即可。
+
 ## 验证清单(部署后手动)
 
 - [ ] 域名打开即新 UI,`/legacy` 是旧界面,未登录时被 Access 拦截。

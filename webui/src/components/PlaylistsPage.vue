@@ -6,6 +6,8 @@ import {
 } from '../api'
 import { useMe } from '../composables/useMe'
 import { formatTime, useStatus } from '../composables/useStatus'
+import { t, typeLabel } from '../i18n'
+import type { Key } from '../i18n/en'
 
 const { me, playlists, reloadPlaylists } = useMe()
 const { applyStatus } = useStatus()
@@ -57,7 +59,7 @@ async function create() {
     await reloadPlaylists()
     select(pl.id)
   } catch {
-    say('Could not create the playlist.')
+    say(t('pl.createFailed'))
   }
 }
 
@@ -70,13 +72,13 @@ async function rename() {
     renaming.value = false
     reloadPlaylists()
   } catch {
-    say('Rename failed.')
+    say(t('pl.renameFailed'))
   }
 }
 
 async function remove() {
   if (!detail.value) return
-  if (!confirm(`Delete playlist "${detail.value.name}"? This cannot be undone.`)) return
+  if (!confirm(t('pl.confirmDelete', { name: detail.value.name }))) return
   await deletePlaylist(detail.value.id)
   selectedId.value = null
   detail.value = null
@@ -89,11 +91,11 @@ async function play(mode: 'append' | 'next' | 'replace', opts: { shuffle?: boole
   try {
     const rv = await playPlaylist(detail.value.id, { mode, ...opts })
     applyStatus(rv)
-    const verb = mode === 'replace' ? 'Now playing' : mode === 'next' ? 'Up next' : 'Queued'
-    say(`${verb}: ${rv.queued} song${rv.queued === 1 ? '' : 's'}` +
-        (rv.skipped ? ` (${rv.skipped} unavailable)` : ''))
+    const verb = t(mode === 'replace' ? 'pl.verbReplace' : mode === 'next' ? 'pl.verbNext' : 'pl.verbAppend')
+    say(t('pl.playResult', { verb, n: rv.queued }) +
+        (rv.skipped ? t('pl.unavailable', { n: rv.skipped }) : ''))
   } catch {
-    say('Could not queue the playlist.')
+    say(t('pl.queueFailed'))
   } finally {
     busy.value = false
   }
@@ -105,13 +107,9 @@ const importUrl = ref('')
 const importInto = ref<'new' | 'current'>('new')
 const importJob = ref<ImportJob | null>(null)
 const importError = ref('')
-const IMPORT_ERRORS: Record<string, string> = {
-  unsupported_source: 'Paste a YouTube playlist, NetEase / QQ Music playlist, or Spotify playlist/album link.',
-  spotify_not_configured: "Couldn't read that Spotify playlist — is it public?",
-  list_failed: "Couldn't read that playlist — is it public?",
-  no_entries: 'That playlist is empty (or private).',
-  too_many_playlists: 'You already have the maximum number of playlists.',
-}
+const IMPORT_ERRORS = ['unsupported_source', 'spotify_not_configured', 'list_failed', 'no_entries', 'too_many_playlists']
+const importErrorText = (code: string) =>
+  IMPORT_ERRORS.includes(code) ? t(`import.${code}` as Key) : t('pl.importFailed')
 
 async function runImport() {
   importError.value = ''
@@ -127,17 +125,17 @@ async function runImport() {
     }
     const job = importJob.value!
     if (job.status === 'error') {
-      importError.value = IMPORT_ERRORS[job.error ?? ''] ?? 'Import failed.'
+      importError.value = importErrorText(job.error ?? '')
       return
     }
     importUrl.value = ''
     await reloadPlaylists()
     if (job.playlist_id) await select(job.playlist_id)
-    say(`Imported ${job.added} song${job.added === 1 ? '' : 's'}` +
-        (job.unmatched?.length ? ` · ${job.unmatched.length} not found on YouTube` : '') +
-        (job.note === 'spotify_truncated' ? ' · only the first 100 (add Spotify API keys for the full list)' : ''))
+    say(t('pl.imported', { n: job.added ?? 0 }) +
+        (job.unmatched?.length ? t('pl.importedUnmatched', { n: job.unmatched.length }) : '') +
+        (job.note === 'spotify_truncated' ? t('pl.importedTruncated') : ''))
   } catch (e) {
-    importError.value = IMPORT_ERRORS[e instanceof Error ? e.message : ''] ?? 'Import failed.'
+    importError.value = importErrorText(e instanceof Error ? e.message : '')
   }
 }
 
@@ -145,11 +143,11 @@ const importRunning = computed(() => !!importJob.value && ['listing', 'matching'
 const importProgress = computed(() => {
   const j = importJob.value
   if (!j) return ''
-  if (j.status === 'listing') return 'Reading the playlist…'
+  if (j.status === 'listing') return t('pl.reading')
   if (j.status === 'matching') {
     return j.source === 'youtube'
-      ? `Adding ${j.total} videos…`
-      : `Finding songs on YouTube… ${j.processed} / ${j.total}`
+      ? t('pl.addingVideos', { n: j.total })
+      : t('pl.matching', { done: j.processed, total: j.total })
   }
   return ''
 })
@@ -159,10 +157,10 @@ async function saveQueue() {
   try {
     const rv = await addToPlaylist(detail.value.id, { source: 'all_queue' })
     detail.value = rv.playlist
-    say(rv.added ? `Saved ${rv.added} song${rv.added === 1 ? '' : 's'} from the queue` : 'The queue is empty.')
+    say(rv.added ? t('pl.savedQueue', { n: rv.added }) : t('pl.queueEmpty'))
     reloadPlaylists()
   } catch {
-    say('Could not save the queue.')
+    say(t('pl.saveQueueFailed'))
   }
 }
 
@@ -189,18 +187,14 @@ async function onDrop(i: number) {
 const totalDuration = computed(() =>
   (detail.value?.items ?? []).reduce((sum, e) => sum + (e.duration || 0), 0))
 
-const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', radio: 'Radio', livestream: 'Live' }
 </script>
 
 <template>
   <section class="mx-auto w-full max-w-5xl px-4 py-8">
     <div v-if="me && !me.can_have_playlists" class="mx-auto max-w-md rounded-2xl p-6 text-center"
          :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
-      <p class="font-semibold">Personal playlists need a sign-in</p>
-      <p class="mt-2 text-sm" :style="{ color: 'var(--c-text-muted)' }">
-        The bot couldn't see a Cloudflare Access identity for this browser. Open it through
-        the Access-protected address and your playlists will show up here.
-      </p>
+      <p class="font-semibold">{{ t('pl.needSignIn') }}</p>
+      <p class="mt-2 text-sm" :style="{ color: 'var(--c-text-muted)' }">{{ t('pl.needSignInHint') }}</p>
     </div>
 
     <div v-else class="grid gap-6 md:grid-cols-[16rem_1fr]">
@@ -210,7 +204,7 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
           <input
             v-model="newName"
             maxlength="60"
-            placeholder="New playlist"
+            :placeholder="t('pl.newPlaceholder')"
             class="min-w-0 flex-1 rounded-full border px-4 py-2 text-sm outline-none"
             :style="{ background: 'var(--c-surface)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
           />
@@ -218,14 +212,14 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
             type="submit"
             class="cursor-pointer rounded-full border-0 px-3.5 text-sm font-semibold"
             :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
-            title="Create playlist"
+            :title="t('pl.create')"
           >＋</button>
         </form>
         <button
           class="mt-2 w-full cursor-pointer rounded-full border-0 px-4 py-2 text-xs font-medium"
           :style="{ background: importOpen ? 'var(--c-accent-soft)' : 'var(--c-surface-2)', color: importOpen ? 'var(--c-accent)' : 'var(--c-text)' }"
           @click="importOpen = !importOpen"
-        >⇣ Import a playlist</button>
+        >{{ t('pl.importToggle') }}</button>
         <div v-if="importOpen" class="mt-2 rounded-xl p-3 text-xs"
              :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
           <form class="flex flex-col gap-2" @submit.prevent="runImport">
@@ -233,7 +227,7 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
               v-model="importUrl"
               type="url"
               required
-              placeholder="Playlist link"
+              :placeholder="t('pl.importLink')"
               class="rounded-lg border px-3 py-1.5 text-xs outline-none"
               :style="{ background: 'var(--c-bg)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
               :disabled="importRunning"
@@ -244,15 +238,15 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
               :style="{ background: 'var(--c-bg)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
               :disabled="importRunning"
             >
-              <option value="new">Into a new playlist</option>
-              <option v-if="detail" value="current">Into "{{ detail.name }}"</option>
+              <option value="new">{{ t('pl.importNew') }}</option>
+              <option v-if="detail" value="current">{{ t('pl.importInto', { name: detail.name }) }}</option>
             </select>
             <button type="submit" class="cursor-pointer rounded-lg border-0 px-3 py-1.5 text-xs font-semibold"
                     :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
-                    :disabled="importRunning || !importUrl.trim()">Import</button>
+                    :disabled="importRunning || !importUrl.trim()">{{ t('pl.import') }}</button>
           </form>
           <p class="mt-2 leading-relaxed" :style="{ color: 'var(--c-text-faint)' }">
-            YouTube, NetEase, QQ Music and Spotify. Non-YouTube songs are matched to YouTube by title, artist and length — NetEase / QQ Music audio is locked outside mainland China.
+            {{ t('pl.importHint') }}
           </p>
           <template v-if="importJob && importRunning">
             <p class="mt-2" :style="{ color: 'var(--c-text-muted)' }">{{ importProgress }}</p>
@@ -263,7 +257,7 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
           <p v-if="importError" class="mt-2" :style="{ color: 'var(--c-danger)' }">{{ importError }}</p>
           <details v-if="importJob?.status === 'done' && importJob.unmatched?.length" class="mt-2">
             <summary class="cursor-pointer" :style="{ color: 'var(--c-text-muted)' }">
-              {{ importJob.unmatched.length }} not found on YouTube
+              {{ t('pl.notFound', { n: importJob.unmatched.length }) }}
             </summary>
             <ul class="mt-1 max-h-32 overflow-y-auto pl-3" :style="{ color: 'var(--c-text-faint)' }">
               <li v-for="u in importJob.unmatched" :key="u" class="truncate">{{ u }}</li>
@@ -285,7 +279,7 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
           </li>
         </ul>
         <p v-if="!playlists.length" class="mt-4 text-sm" :style="{ color: 'var(--c-text-faint)' }">
-          No playlists yet. Create one, then use ♡ on any song to add it.
+          {{ t('pl.noneYet') }}
         </p>
       </aside>
 
@@ -301,17 +295,17 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
                 :style="{ background: 'var(--c-surface)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
               />
               <button type="submit" class="cursor-pointer rounded-lg border-0 px-3 text-xs font-semibold"
-                      :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }">Save</button>
+                      :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }">{{ t('common.save') }}</button>
             </form>
             <h1 v-else class="flex items-center gap-2 truncate text-2xl font-semibold">
               {{ detail.name }}
               <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
-                      title="Rename" @click="renaming = true; renameDraft = detail.name">✎</button>
+                      :title="t('pl.rename')" @click="renaming = true; renameDraft = detail.name">✎</button>
               <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
-                      title="Delete playlist" @click="remove">🗑</button>
+                      :title="t('pl.delete')" @click="remove">🗑</button>
             </h1>
             <p class="mt-1 text-sm" :style="{ color: 'var(--c-text-muted)' }">
-              {{ detail.items.length }} song{{ detail.items.length === 1 ? '' : 's' }}
+              {{ t('common.songs', { n: detail.items.length }) }}
               <span v-if="totalDuration"> · {{ formatTime(totalDuration) }}</span>
             </p>
           </div>
@@ -320,21 +314,21 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
               class="cursor-pointer rounded-full border-0 px-4 py-2 text-sm font-semibold"
               :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
               :disabled="!detail.items.length || busy"
-              title="Clear the queue and play this playlist"
+              :title="t('pl.playNowHint')"
               @click="play('replace')"
-            >▶ Play now</button>
+            >{{ t('pl.playNow') }}</button>
             <button
               class="cursor-pointer rounded-full border-0 px-3.5 py-2 text-sm"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
               :disabled="!detail.items.length || busy"
               @click="play('replace', { shuffle: true })"
-            >⇄ Shuffle</button>
+            >{{ t('pl.shuffle') }}</button>
             <button
               class="cursor-pointer rounded-full border-0 px-3.5 py-2 text-sm"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
               :disabled="!detail.items.length || busy"
               @click="play('append')"
-            >＋ Queue all</button>
+            >{{ t('pl.queueAll') }}</button>
           </div>
         </div>
 
@@ -361,30 +355,29 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm font-medium" :title="e.title">{{ e.title || e.ref }}</p>
               <p class="truncate text-xs" :style="{ color: 'var(--c-text-muted)' }">
-                {{ [TYPE_LABEL[e.type] ?? e.type, e.duration ? formatTime(e.duration) : ''].filter(Boolean).join(' · ') }}
+                {{ [typeLabel(e.type), e.duration ? formatTime(e.duration) : ''].filter(Boolean).join(' · ') }}
               </p>
             </div>
             <div class="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
               <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                      title="Play next" @click="play('next', { item: e.id })">⤴</button>
+                      :title="t('common.playNext')" @click="play('next', { item: e.id })">⤴</button>
               <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                      title="Add to queue" @click="play('append', { item: e.id })">＋</button>
+                      :title="t('common.addToQueue')" @click="play('append', { item: e.id })">＋</button>
               <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
-                      title="Remove from playlist" @click="dropItem(e.id)">✕</button>
+                      :title="t('pl.removeItem')" @click="dropItem(e.id)">✕</button>
             </div>
           </li>
         </ul>
         <div v-else class="mt-6 rounded-2xl p-6 text-center text-sm"
              :style="{ background: 'var(--c-surface)', color: 'var(--c-text-muted)' }">
-          <p>This playlist is empty.</p>
-          <p class="mt-1">Tap ♡ on the Now Playing screen, the queue, Search or Library to add songs —
-            or grab the whole current queue:</p>
+          <p>{{ t('pl.empty') }}</p>
+          <p class="mt-1">{{ t('pl.emptyHint') }}</p>
           <button class="mt-3 cursor-pointer rounded-full border-0 px-4 py-2 text-xs font-semibold"
                   :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
-                  @click="saveQueue">Save the current queue here</button>
+                  @click="saveQueue">{{ t('pl.saveQueueHere') }}</button>
         </div>
       </div>
     </div>

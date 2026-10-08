@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createBindCode, fetchMe, saveAlias, unbindMumble } from '../api'
 import { useMe } from '../composables/useMe'
+import { t, tParts } from '../i18n'
+import type { Key } from '../i18n/en'
 
 const { me } = useMe()
 
@@ -9,6 +11,7 @@ const open = ref(false)
 const draft = ref('')
 const saving = ref(false)
 const message = ref('')
+const messageOk = ref(false) // 颜色靠这个判断,不再看文案里有没有 ✓
 const root = ref<HTMLElement | null>(null)
 
 const initial = computed(() => (me.value?.display_name || '?').trim().charAt(0).toUpperCase())
@@ -27,14 +30,13 @@ async function save(alias: string) {
   message.value = ''
   try {
     me.value = await saveAlias(alias.trim())
-    message.value = alias.trim() ? 'Saved ✓' : 'Alias cleared'
+    message.value = t(alias.trim() ? 'me.saved' : 'me.cleared')
+    messageOk.value = true
     draft.value = me.value.alias
   } catch (e) {
     const reason = e instanceof Error ? e.message : ''
-    message.value =
-      reason === 'taken' ? 'Someone already uses that name.'
-      : reason === 'invalid' ? 'Max 24 characters, no < > & or quotes.'
-      : 'Could not save.'
+    message.value = t(reason === 'taken' ? 'me.taken' : reason === 'invalid' ? 'me.invalid' : 'common.saveFailed')
+    messageOk.value = false
   } finally {
     saving.value = false
   }
@@ -43,18 +45,20 @@ async function save(alias: string) {
 // ---- Mumble 绑定:生成一次性码,等用户在 Mumble 里发 !bind ----
 const bind = ref<{ code: string; command: string; expires_at: number } | null>(null)
 const bindMsg = ref('')
+const bindOk = ref(false)
 const copied = ref(false)
 let bindPoll: ReturnType<typeof setInterval> | undefined
 
 async function startBind() {
   bindMsg.value = ''
+  bindOk.value = false
   try {
     bind.value = await createBindCode()
     clearInterval(bindPoll)
     bindPoll = setInterval(async () => {
       if (!bind.value || Date.now() / 1000 > bind.value.expires_at) {
         clearInterval(bindPoll)
-        if (bind.value) bindMsg.value = 'Code expired — generate a new one.'
+        if (bind.value) bindMsg.value = t('me.codeExpired')
         bind.value = null
         return
       }
@@ -63,13 +67,14 @@ async function startBind() {
         if (fresh.mumble) {
           me.value = fresh
           bind.value = null
-          bindMsg.value = `Linked to ${fresh.mumble.mumble_name} ✓`
+          bindMsg.value = t('me.linked', { name: fresh.mumble.mumble_name })
+          bindOk.value = true
           clearInterval(bindPoll)
         }
       } catch { /* 下一轮再试 */ }
     }, 3000)
   } catch {
-    bindMsg.value = 'Could not create a code.'
+    bindMsg.value = t('me.codeFailed')
   }
 }
 
@@ -83,9 +88,10 @@ async function copyCommand() {
 }
 
 async function unlink() {
-  if (!confirm('Unlink your Mumble account?')) return
+  if (!confirm(t('me.confirmUnlink'))) return
   me.value = await unbindMumble()
-  bindMsg.value = 'Unlinked.'
+  bindMsg.value = t('me.unlinked')
+  bindOk.value = false
 }
 
 onBeforeUnmount(() => clearInterval(bindPoll))
@@ -96,11 +102,11 @@ function onDocClick(e: MouseEvent) {
 onMounted(() => document.addEventListener('click', onDocClick))
 onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
-const SOURCE_LABEL: Record<string, string> = {
-  'cloudflare': 'Cloudflare Access',
-  'cloudflare-jwt': 'Cloudflare Access (JWT verified)',
-  'web-user': 'Web login',
-  'anonymous': 'Not identified',
+const SOURCE_LABEL: Record<string, Key> = {
+  'cloudflare': 'me.src.cloudflare',
+  'cloudflare-jwt': 'me.src.cloudflareJwt',
+  'web-user': 'me.src.webUser',
+  'anonymous': 'me.src.anonymous',
 }
 </script>
 
@@ -109,7 +115,7 @@ const SOURCE_LABEL: Record<string, string> = {
     <button
       class="flex h-9 max-w-[9rem] cursor-pointer items-center gap-2 rounded-full border-0 py-1 pr-3 pl-1 text-xs font-medium"
       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-      :title="me?.email || 'Who am I?'"
+      :title="me?.email || t('me.whoami')"
       @click.stop="toggle"
     >
       <span
@@ -118,7 +124,7 @@ const SOURCE_LABEL: Record<string, string> = {
           ? { background: 'var(--c-accent)', color: 'var(--c-on-accent)' }
           : { background: 'var(--c-border)', color: 'var(--c-text-muted)' }"
       >{{ signedIn ? initial : '?' }}</span>
-      <span class="truncate">{{ signedIn ? me?.display_name : 'Guest' }}</span>
+      <span class="truncate">{{ signedIn ? me?.display_name : t('me.guest') }}</span>
     </button>
 
     <div
@@ -128,22 +134,22 @@ const SOURCE_LABEL: Record<string, string> = {
       @click.stop
     >
       <template v-if="signedIn">
-        <p class="text-xs" :style="{ color: 'var(--c-text-muted)' }">Signed in as</p>
+        <p class="text-xs" :style="{ color: 'var(--c-text-muted)' }">{{ t('me.signedInAs') }}</p>
         <p class="truncate font-medium" :title="me?.email || me?.identity || ''">{{ me?.email || me?.identity }}</p>
-        <p class="mt-0.5 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">via {{ SOURCE_LABEL[me?.source ?? 'anonymous'] }}</p>
+        <p class="mt-0.5 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ t('me.via', { source: t(SOURCE_LABEL[me?.source ?? 'anonymous'] ?? 'me.src.anonymous') }) }}</p>
 
         <label class="mt-4 block text-xs font-medium" :style="{ color: 'var(--c-text-muted)' }" for="alias-input">
-          Display name
+          {{ t('me.displayName') }}
         </label>
         <p class="text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-          Shown in Mumble when you add songs, and in Stats.
+          {{ t('me.displayNameHint') }}
         </p>
         <form class="mt-2 flex gap-2" @submit.prevent="save(draft)">
           <input
             id="alias-input"
             v-model="draft"
             maxlength="24"
-            :placeholder="me?.email?.split('@')[0] ?? 'alias'"
+            :placeholder="me?.email?.split('@')[0] ?? t('me.aliasPlaceholder')"
             class="min-w-0 flex-1 rounded-lg border px-3 py-1.5 text-sm outline-none"
             :style="{ background: 'var(--c-bg)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
           />
@@ -152,57 +158,54 @@ const SOURCE_LABEL: Record<string, string> = {
             class="cursor-pointer rounded-lg border-0 px-3 py-1.5 text-xs font-semibold"
             :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
             :disabled="saving"
-          >Save</button>
+          >{{ t('common.save') }}</button>
         </form>
         <div class="mt-2 flex items-center justify-between">
-          <span class="text-xs" :style="{ color: message.endsWith('✓') || message === 'Alias cleared' ? 'var(--c-success)' : 'var(--c-danger)' }">{{ message }}</span>
+          <span class="text-xs" :style="{ color: messageOk ? 'var(--c-success)' : 'var(--c-danger)' }">{{ message }}</span>
           <button
             v-if="me?.alias"
             class="cursor-pointer border-0 bg-transparent p-0 text-xs underline"
             :style="{ color: 'var(--c-text-muted)' }"
             @click="save('')"
-          >Clear alias</button>
+          >{{ t('me.clear') }}</button>
         </div>
 
         <!-- Mumble 账号绑定 -->
         <div class="mt-4 border-t pt-3" :style="{ borderColor: 'var(--c-border)' }">
-          <p class="text-xs font-medium" :style="{ color: 'var(--c-text-muted)' }">Mumble account</p>
+          <p class="text-xs font-medium" :style="{ color: 'var(--c-text-muted)' }">{{ t('me.mumble') }}</p>
           <template v-if="me?.mumble">
             <div class="mt-1 flex items-center justify-between">
               <span class="text-sm">🎧 {{ me.mumble.mumble_name }}</span>
               <button class="cursor-pointer border-0 bg-transparent p-0 text-xs underline"
-                      :style="{ color: 'var(--c-text-muted)' }" @click="unlink">Unlink</button>
+                      :style="{ color: 'var(--c-text-muted)' }" @click="unlink">{{ t('me.unlink') }}</button>
             </div>
             <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-              In Mumble: <b>!mylist</b> lists your playlists, <b>!fav</b> saves the current song.
+              <template v-for="(p, i) in tParts('me.mumbleHint', { mylist: '!mylist', fav: '!fav' })" :key="i"><b
+                v-if="p.param">{{ p.text }}</b><template v-else>{{ p.text }}</template></template>
             </p>
           </template>
           <template v-else-if="bind">
-            <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">Send this to the bot in Mumble (a private message works best):</p>
+            <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ t('me.sendThis') }}</p>
             <button
               class="mt-1.5 flex w-full cursor-pointer items-center justify-between rounded-lg border-0 px-3 py-2 font-mono text-base tracking-wider"
               :style="{ background: 'var(--c-bg)', color: 'var(--c-text)' }"
-              title="Copy"
+              :title="t('me.copy')"
               @click="copyCommand"
-            >{{ bind.command }}<span class="font-sans text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ copied ? 'Copied ✓' : 'Copy' }}</span></button>
-            <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">Valid for 10 minutes · waiting for you…</p>
+            >{{ bind.command }}<span class="font-sans text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ t(copied ? 'me.copied' : 'me.copy') }}</span></button>
+            <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ t('me.validFor') }}</p>
           </template>
           <button
             v-else
             class="mt-1.5 w-full cursor-pointer rounded-lg border-0 px-3 py-1.5 text-xs font-medium"
             :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
             @click="startBind"
-          >Link Mumble account</button>
-          <p v-if="bindMsg" class="mt-1 text-xs" :style="{ color: bindMsg.includes('✓') ? 'var(--c-success)' : 'var(--c-text-muted)' }">{{ bindMsg }}</p>
+          >{{ t('me.link') }}</button>
+          <p v-if="bindMsg" class="mt-1 text-xs" :style="{ color: bindOk ? 'var(--c-success)' : 'var(--c-text-muted)' }">{{ bindMsg }}</p>
         </div>
       </template>
       <template v-else>
-        <p class="font-medium">You're browsing as a guest</p>
-        <p class="mt-1 text-xs leading-relaxed" :style="{ color: 'var(--c-text-muted)' }">
-          No Cloudflare Access identity reached the bot, so songs you add are credited to
-          "Remote Control" and personal playlists are off. Open the bot through its
-          Access-protected address to sign in.
-        </p>
+        <p class="font-medium">{{ t('me.guestTitle') }}</p>
+        <p class="mt-1 text-xs leading-relaxed" :style="{ color: 'var(--c-text-muted)' }">{{ t('me.guestHint') }}</p>
       </template>
     </div>
   </div>

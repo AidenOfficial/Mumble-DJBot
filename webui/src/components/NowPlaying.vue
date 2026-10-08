@@ -5,6 +5,7 @@ import Controls from './Controls.vue'
 import AddToPlaylist from './AddToPlaylist.vue'
 import PrepPanel from './PrepPanel.vue'
 import { formatTime, useStatus } from '../composables/useStatus'
+import { modeLabel, t, typeLabel } from '../i18n'
 
 const { status, error, clock, progress, syncedAt } = useStatus()
 
@@ -32,16 +33,7 @@ const skipBlocks = computed(() => {
   }))
 })
 
-const sourceLabel = computed(() => {
-  const t = current.value?.type ?? ''
-  const labels: Record<string, string> = {
-    url: 'Stream',
-    file: 'Library',
-    radio: 'Radio',
-    playlist: 'Playlist',
-  }
-  return labels[t] ?? t
-})
+const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
 </script>
 
 <template>
@@ -74,12 +66,12 @@ const sourceLabel = computed(() => {
         <!-- 还在读取信息时标题就是链接本身:先显示占位,链接用小字 -->
         <template v-if="titlePending">
           <h1 class="max-w-full truncate text-xl font-semibold sm:text-2xl" :style="{ color: 'var(--c-text-muted)' }">
-            Loading title…
+            {{ t('np.loadingTitle') }}
           </h1>
           <p class="max-w-full truncate text-xs" :style="{ color: 'var(--c-text-faint)' }">{{ current.title }}</p>
         </template>
         <h1 v-else class="max-w-full truncate text-xl font-semibold sm:text-2xl" :title="current.title">
-          {{ current.title || 'Untitled' }}
+          {{ current.title || t('common.untitled') }}
         </h1>
         <p class="flex items-center gap-2 text-sm" :style="{ color: 'var(--c-text-muted)' }">
           <span
@@ -87,15 +79,15 @@ const sourceLabel = computed(() => {
             :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
           >{{ sourceLabel }}</span>
           <span v-if="current.artist && current.artist !== '??'">{{ current.artist }}</span>
-          <AddToPlaylist :source="{ source: 'current' }" label="Save" />
+          <AddToPlaylist :source="{ source: 'current' }" :label="t('np.save')" />
         </p>
       </template>
       <template v-else>
         <h1 class="text-xl font-semibold sm:text-2xl" :style="{ color: 'var(--c-text-muted)' }">
-          Nothing playing
+          {{ t('np.nothing') }}
         </h1>
         <p class="text-sm" :style="{ color: 'var(--c-text-faint)' }">
-          The queue is empty - add something from Mumble or the search page.
+          {{ t('np.emptyHint') }}
         </p>
       </template>
     </div>
@@ -131,7 +123,7 @@ const sourceLabel = computed(() => {
           :key="i"
           class="absolute inset-y-0 rounded-full"
           :style="{ left: `${b.left}%`, width: `${b.width}%`, background: 'repeating-linear-gradient(135deg, var(--c-text-faint) 0 3px, transparent 3px 6px)', opacity: 0.7 }"
-          :title="`Skipped: ${formatTime(b.start)}–${formatTime(b.end)}`"
+          :title="t('np.skipped', { from: formatTime(b.start), to: formatTime(b.end) })"
         />
       </div>
       <div class="mt-1.5 flex justify-between text-xs tabular-nums" :style="{ color: 'var(--c-text-muted)' }">
@@ -139,12 +131,12 @@ const sourceLabel = computed(() => {
         <span>{{ current.duration ? formatTime(current.duration) : '--:--' }}</span>
       </div>
       <p v-if="current.download" class="mt-1 text-center text-[11px] tabular-nums" :style="{ color: 'var(--c-text-faint)' }">
-        ⇣ Still downloading in the background · {{ Math.round(current.download.progress * 100) }}%<template
+        {{ t('np.bgDownload', { pct: Math.round(current.download.progress * 100) }) }}<template
           v-if="current.download.speed"> · {{ formatBytes(current.download.speed) }}/s</template><template
-          v-if="current.download.eta"> · done in {{ formatTime(current.download.eta) }}</template>
+          v-if="current.download.eta"> · {{ t('np.bgDone', { eta: formatTime(current.download.eta) }) }}</template>
       </p>
       <p v-if="skipBlocks.length" class="mt-1 text-center text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-        ⏭ Skipping {{ skipBlocks.length }} non-music part{{ skipBlocks.length === 1 ? '' : 's' }} (SponsorBlock)
+        {{ t('np.skipping', { n: skipBlocks.length }) }}
       </p>
     </div>
 
@@ -153,12 +145,12 @@ const sourceLabel = computed(() => {
 
     <!-- queue summary -->
     <p v-if="status && !status.empty" class="text-sm" :style="{ color: 'var(--c-text-muted)' }">
-      {{ status.queue_length }} in queue · {{ status.mode }} mode
-      <span v-if="!status.play" :style="{ color: 'var(--c-accent)' }"> · paused</span>
+      {{ t('np.summary', { n: status.queue_length, mode: modeLabel(status.mode) }) }}
+      <span v-if="!status.play" :style="{ color: 'var(--c-accent)' }"> · {{ t('np.paused') }}</span>
     </p>
 
     <p v-if="error" class="rounded-md px-3 py-2 text-sm" :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-danger)' }">
-      Can't reach the bot: {{ error }}
+      {{ t('np.unreachable', { error }) }}
     </p>
   </section>
 </template>

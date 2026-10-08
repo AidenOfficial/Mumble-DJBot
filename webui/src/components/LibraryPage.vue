@@ -4,6 +4,8 @@ import { formatBytes } from '../api'
 import { uploadFile, UploadError } from '../upload'
 import { useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
+import { t, typeLabel } from '../i18n'
+import type { Key } from '../i18n/en'
 
 interface LibItem {
   id: string
@@ -99,13 +101,7 @@ interface UploadRow {
 const uploads = ref<UploadRow[]>([])
 let uploadSeq = 0
 
-const UPLOAD_ERRORS: Record<string, string> = {
-  too_large: 'File is larger than the upload limit.',
-  unsupported_type: 'Only audio or video files can be uploaded.',
-  no_space: 'Not enough disk space on the bot.',
-  network: 'Network keeps failing — try again later.',
-  aborted: 'Cancelled.',
-}
+const UPLOAD_ERRORS = ['too_large', 'unsupported_type', 'no_space', 'network', 'aborted']
 
 async function onUpload(e: Event) {
   const input = e.target as HTMLInputElement
@@ -127,16 +123,18 @@ async function onUpload(e: Event) {
         row.phase = 'done'
         row.itemId = rv.item_id
         row.message = rv.extracted
-          ? `Saved audio only (${formatBytes(rv.final_size ?? 0)})`
-          : `Saved as ${rv.path}`
+          ? t('lib.savedAudio', { size: formatBytes(rv.final_size ?? 0) })
+          : t('lib.savedAs', { path: rv.path ?? '' })
         query(page.value)
       } else {
         row.phase = 'error'
-        row.message = rv.error ?? 'Processing failed.'
+        row.message = rv.error ?? t('lib.processFailed')
       }
     } catch (err) {
       row.phase = 'error'
-      row.message = err instanceof UploadError ? (UPLOAD_ERRORS[err.code] ?? `Upload failed (${err.code}).`) : 'Upload failed.'
+      row.message = !(err instanceof UploadError) ? t('lib.uploadFailed')
+        : UPLOAD_ERRORS.includes(err.code) ? t(`upload.${err.code}` as Key)
+        : t('lib.uploadFailedCode', { code: err.code })
     }
   }
 }
@@ -149,16 +147,11 @@ async function queueUpload(row: UploadRow) {
     row.queued = true
     refresh()
   } catch {
-    row.message = 'Could not add to the queue.'
+    row.message = t('lib.queueFailed')
   }
 }
 
-const TYPES = [
-  { key: '', label: 'All' },
-  { key: 'file', label: 'Library' },
-  { key: 'url', label: 'Stream' },
-  { key: 'radio', label: 'Radio' },
-] as const
+const TYPES = ['', 'file', 'url', 'radio'] as const
 </script>
 
 <template>
@@ -168,7 +161,7 @@ const TYPES = [
       <input
         v-model="keywords"
         type="search"
-        placeholder="Filter the library..."
+        :placeholder="t('lib.filter')"
         class="w-full rounded-full border px-5 py-2.5 text-sm outline-none"
         :style="{ background: 'var(--c-surface)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
         @input="onInput"
@@ -176,14 +169,14 @@ const TYPES = [
       <div class="flex flex-wrap items-center gap-2">
         <div class="flex gap-1 rounded-full p-1" :style="{ background: 'var(--c-surface-2)' }">
           <button
-            v-for="t in TYPES"
-            :key="t.key"
+            v-for="k in TYPES"
+            :key="k"
             class="cursor-pointer rounded-full border-0 px-3 py-1 text-xs font-medium"
-            :style="typeFilter === t.key
+            :style="typeFilter === k
               ? { background: 'var(--c-accent)', color: 'var(--c-on-accent)' }
               : { background: 'transparent', color: 'var(--c-text-muted)' }"
-            @click="typeFilter = t.key; query(1)"
-          >{{ t.label }}</button>
+            @click="typeFilter = k; query(1)"
+          >{{ k ? typeLabel(k) : t('common.all') }}</button>
         </div>
         <select
           v-if="allTags.length"
@@ -192,15 +185,15 @@ const TYPES = [
           :style="{ background: 'var(--c-surface)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
           @change="query(1)"
         >
-          <option value="">All tags</option>
-          <option v-for="t in allTags" :key="t" :value="t">{{ t }}</option>
+          <option value="">{{ t('lib.allTags') }}</option>
+          <option v-for="tag in allTags" :key="tag" :value="tag">{{ tag }}</option>
         </select>
         <label
           v-if="uploadEnabled"
           class="ml-auto cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium"
           :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
         >
-          Upload
+          {{ t('lib.upload') }}
           <input type="file" accept="audio/*,video/*,.mkv,.flv" multiple class="hidden" @change="onUpload" />
         </label>
       </div>
@@ -212,15 +205,15 @@ const TYPES = [
             <span class="min-w-0 flex-1 truncate font-medium" :title="u.name">{{ u.name }}</span>
             <span class="shrink-0 tabular-nums" :style="{ color: 'var(--c-text-muted)' }">
               <template v-if="u.phase === 'uploading'">{{ formatBytes(u.sent) }} / {{ formatBytes(u.total) }}</template>
-              <template v-else-if="u.phase === 'processing'">Processing…</template>
+              <template v-else-if="u.phase === 'processing'">{{ t('lib.processing') }}</template>
             </span>
             <button v-if="u.phase === 'uploading'" class="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-xs"
-                    :style="{ color: 'var(--c-text-faint)' }" title="Cancel" @click="u.ctrl.abort()">✕</button>
+                    :style="{ color: 'var(--c-text-faint)' }" :title="t('common.cancel')" @click="u.ctrl.abort()">✕</button>
             <button v-if="u.phase === 'done' && u.itemId && !u.queued"
                     class="shrink-0 cursor-pointer rounded-md border-0 px-2 py-0.5 text-xs font-semibold"
                     :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
-                    @click="queueUpload(u)">+ Queue</button>
-            <span v-if="u.queued" class="shrink-0" :style="{ color: 'var(--c-accent)' }">Queued ✓</span>
+                    @click="queueUpload(u)">{{ t('common.queue') }}</button>
+            <span v-if="u.queued" class="shrink-0" :style="{ color: 'var(--c-accent)' }">{{ t('common.queued') }}</span>
           </div>
           <div v-if="u.phase === 'uploading' || u.phase === 'processing'" class="mt-1.5 h-1 w-full overflow-hidden rounded-full"
                :style="{ background: 'var(--c-surface-2)' }">
@@ -261,21 +254,21 @@ const TYPES = [
             <button
               class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-              title="Play next"
+              :title="t('common.playNext')"
               @click="add(item, true)"
-            >⤴ Next</button>
+            >{{ t('lib.next') }}</button>
             <button
               class="cursor-pointer rounded-md border-0 px-2.5 py-1 text-xs font-semibold"
               :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
-              title="Add to queue"
+              :title="t('common.addToQueue')"
               @click="add(item, false)"
-            >+ Queue</button>
+            >{{ t('common.queue') }}</button>
           </template>
         </div>
       </li>
     </ul>
     <p v-else-if="!loading" class="mt-8 text-center text-sm" :style="{ color: 'var(--c-text-muted)' }">
-      Nothing in the library matches.
+      {{ t('lib.empty') }}
     </p>
 
     <!-- pagination -->
@@ -285,14 +278,14 @@ const TYPES = [
         :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
         :disabled="page <= 1"
         @click="query(page - 1)"
-      >‹ Prev</button>
+      >{{ t('lib.prev') }}</button>
       <span class="tabular-nums" :style="{ color: 'var(--c-text-muted)' }">{{ page }} / {{ totalPages }}</span>
       <button
         class="cursor-pointer rounded-full border-0 px-3 py-1.5"
         :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
         :disabled="page >= totalPages"
         @click="query(page + 1)"
-      >Next ›</button>
+      >{{ t('lib.nextPage') }}</button>
     </div>
   </section>
 </template>

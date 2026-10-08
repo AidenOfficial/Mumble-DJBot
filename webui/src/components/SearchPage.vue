@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { postQueue as _pq, thumbnailUrl as _tn } from '../api'
 import { formatTime, useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
+import { t } from '../i18n'
 
 interface SearchResult {
   source: 'youtube' | 'bilibili'
@@ -93,7 +94,7 @@ const SOURCE_STYLE: Record<string, { label: string; bg: string; fg: string }> = 
       <input
         v-model="query"
         type="search"
-        placeholder="Search YouTube and Bilibili..."
+        :placeholder="t('search.placeholder')"
         class="w-full rounded-full border py-3 pr-4 pl-12 text-sm outline-none"
         :style="{ background: 'var(--c-surface)', borderColor: 'var(--c-border)', color: 'var(--c-text)', boxShadow: 'var(--shadow-1)' }"
         @input="onInput"
@@ -107,7 +108,7 @@ const SOURCE_STYLE: Record<string, { label: string; bg: string; fg: string }> = 
     </div>
 
     <p v-if="failed.length && searched" class="mt-3 text-xs" :style="{ color: 'var(--c-text-muted)' }">
-      {{ failed.join(' & ') }} search unavailable right now - showing the rest.
+      {{ t('search.partial', { sources: failed.map((s) => SOURCE_STYLE[s]?.label ?? s).join(t('search.sourceJoin')) }) }}
     </p>
 
     <!-- results -->
@@ -145,19 +146,19 @@ const SOURCE_STYLE: Record<string, { label: string; bg: string; fg: string }> = 
           :disabled="added[`${r.source}:${r.id}`] === 'pending' || added[`${r.source}:${r.id}`] === 'done'"
           @click="add(r)"
         >
-          <span v-if="added[`${r.source}:${r.id}`] === 'done'">Queued ✓</span>
+          <span v-if="added[`${r.source}:${r.id}`] === 'done'">{{ t('common.queued') }}</span>
           <span v-else-if="added[`${r.source}:${r.id}`] === 'pending'">...</span>
-          <span v-else-if="added[`${r.source}:${r.id}`] === 'error'">Failed</span>
-          <span v-else>+ Queue</span>
+          <span v-else-if="added[`${r.source}:${r.id}`] === 'error'">{{ t('common.failed') }}</span>
+          <span v-else>{{ t('common.queue') }}</span>
         </button>
       </li>
     </ul>
 
     <p v-else-if="searched && !loading" class="mt-8 text-center text-sm" :style="{ color: 'var(--c-text-muted)' }">
-      No results for "{{ query }}".
+      {{ t('search.none', { q: query }) }}
     </p>
     <p v-else-if="!searched" class="mt-8 text-center text-sm" :style="{ color: 'var(--c-text-faint)' }">
-      Type at least two characters to search both sources at once.
+      {{ t('search.hint') }}
     </p>
   </section>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ChannelNode } from '../api'
+import { t } from '../i18n'
 
 // 递归渲染一个频道及其子频道
 const props = defineProps<{
@@ -34,8 +35,8 @@ const people = computed(() => props.node.users.filter((u) => !u.is_me && !u.is_b
         <span class="truncate">{{ node.name }}</span>
       </span>
       <span v-if="isDefault" class="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-accent)' }" title="Default channel">★ Default</span>
-      <span v-if="node.temporary" class="text-[10px]" :style="{ color: 'var(--c-text-faint)' }">temporary</span>
+            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-accent)' }" :title="t('ch.defaultTitle')">{{ t('ch.default') }}</span>
+      <span v-if="node.temporary" class="text-[10px]" :style="{ color: 'var(--c-text-faint)' }">{{ t('ch.temporary') }}</span>
       <span v-if="people" class="text-[11px] tabular-nums" :style="{ color: 'var(--c-text-faint)' }">{{ people }} 👤</span>
 
       <span class="ml-auto flex shrink-0 gap-1 opacity-70 transition-opacity group-hover:opacity-100">
@@ -44,17 +45,17 @@ const people = computed(() => props.node.users.filter((u) => !u.is_me && !u.is_b
           class="cursor-pointer rounded-md border-0 px-2 py-0.5 text-[11px]"
           :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
           :disabled="busy"
-          title="Move the bot here now"
+          :title="t('ch.moveTitle')"
           @click="emit('move', node.id)"
-        >Move here</button>
+        >{{ t('ch.move') }}</button>
         <button
           v-if="!isDefault"
           class="cursor-pointer rounded-md border-0 px-2 py-0.5 text-[11px]"
           :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
           :disabled="busy"
-          title="Join this channel on startup and on !oust"
+          :title="t('ch.setDefaultTitle')"
           @click="emit('setDefault', node.id)"
-        >☆ Default</button>
+        >{{ t('ch.setDefault') }}</button>
       </span>
 
       <!-- 频道里的人 -->
@@ -73,8 +74,8 @@ const people = computed(() => props.node.users.filter((u) => !u.is_me && !u.is_b
             {{ u.is_me ? '♪' : u.name.charAt(0).toUpperCase() }}
           </span>
           {{ u.name }}
-          <span v-if="u.deafened" title="Deafened">🔇</span>
-          <span v-else-if="u.muted" class="text-[10px] opacity-70" title="Muted">muted</span>
+          <span v-if="u.deafened" :title="t('ch.deafened')">🔇</span>
+          <span v-else-if="u.muted" class="text-[10px] opacity-70" :title="t('ch.mutedTitle')">{{ t('ch.muted') }}</span>
         </span>
       </div>
     </div>

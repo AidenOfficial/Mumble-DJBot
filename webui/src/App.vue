@@ -9,14 +9,17 @@ import PlaylistsPage from './components/PlaylistsPage.vue'
 import UserChip from './components/UserChip.vue'
 import CachePage from './components/CachePage.vue'
 import SettingsPage from './components/SettingsPage.vue'
+import { LOCALES, locale, t } from './i18n'
+import type { Key } from './i18n/en'
 
 type Theme = 'light' | 'dark' | 'auto'
 const theme = ref<Theme>('auto')
+const THEME_KEY: Record<Theme, Key> = { auto: 'theme.auto', light: 'theme.light', dark: 'theme.dark' }
 
 type View = 'home' | 'search' | 'library' | 'lists' | 'stats' | 'cache' | 'settings'
 const VIEWS: View[] = ['home', 'search', 'library', 'lists', 'stats', 'cache', 'settings']
-const VIEW_LABEL: Record<View, string> = {
-  home: 'Now Playing', search: 'Search', library: 'Library', lists: 'Playlists', stats: 'Stats', cache: 'Cache', settings: 'Settings',
+const VIEW_LABEL: Record<View, Key> = {
+  home: 'nav.home', search: 'nav.search', library: 'nav.library', lists: 'nav.lists', stats: 'nav.stats', cache: 'nav.cache', settings: 'nav.settings',
 }
 const view = ref<View>('home')
 
@@ -74,14 +77,23 @@ onMounted(() => {
               ? { background: 'var(--c-surface)', color: 'var(--c-text)', boxShadow: 'var(--shadow-1)' }
               : { background: 'transparent', color: 'var(--c-text-muted)' }"
             @click="view = v"
-          >{{ VIEW_LABEL[v] }}</button>
+          >{{ t(VIEW_LABEL[v]) }}</button>
         </nav>
         <div class="flex items-center gap-2">
           <UserChip />
+          <select
+            v-model="locale"
+            class="h-9 cursor-pointer rounded-full border-0 px-2.5 text-xs outline-none"
+            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
+            :title="t('lang.title')"
+            :aria-label="t('lang.title')"
+          >
+            <option v-for="l in LOCALES" :key="l.code" :value="l.code">{{ l.label }}</option>
+          </select>
           <button
             class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-0 text-lg"
             :style="{ background: 'var(--c-surface-2)' }"
-            :title="`Theme: ${theme}`"
+            :title="t('theme.title', { mode: t(THEME_KEY[theme]) })"
             @click="cycleTheme"
           >
             <span v-if="theme === 'light'">☀️</span>
