@@ -65,10 +65,92 @@ class MatchTest(unittest.TestCase):
         cands = [self.cand('YOASOBI アイドル 1 hour', 'x', 3600, 'loop')]
         self.assertIsNone(pi.match_on_youtube(self.TRACK, search=lambda q: cands))
 
+    def test_slashes_removed_from_query_and_first_artist_retry(self):
+        # 实测:yt-dlp 的 ytsearch 遇到 "A/B/C" 直接返回空
+        queries = []
+
+        def search(q):
+            queries.append(q)
+            if len(queries) == 1:
+                return []
+            return [self.cand('Prospa - Free Your Mind', 'Prospa', 201, 'ok')]
+        track = {'title': 'Free Your Mind [Extended]', 'artist': 'Prospa/Cloonee/Sybil', 'duration': 201}
+        self.assertTrue(pi.match_on_youtube(track, search=search).endswith('v=ok'))
+        self.assertEqual(queries, ['Prospa Cloonee Sybil Free Your Mind', 'prospa Free Your Mind'])
+
+    def test_vetoes_seen_in_real_imports(self):
+        # 同名的别人的歌,时长差很多
+        self.assertIsNone(pi.score_candidate(
+            {'title': 'Away We Go', 'artist': 'Ted Nights/Magilo', 'duration': 176},
+            self.cand('1WayTKT - Away We Go (feat. Matt Beilis)', 'Armair Beats', 257)))
+        # 同一歌手的另一首(只共用 "Acoustic" 这种版本词)
+        self.assertIsNone(pi.score_candidate(
+            {'title': 'Lion - Acoustic', 'artist': 'Hearts & Colors', 'duration': 167},
+            self.cand('Hearts & Colors - Waterbed (Acoustic)', 'Hearts & Colors', 186)))
+        # 两个词的歌名只对上一个
+        self.assertIsNone(pi.score_candidate(
+            {'title': 'SMOKE ALT [SKRLX TOOLS]', 'artist': 'Skrillex/ISOxo', 'duration': 185},
+            self.cand('Skrillex & ISOxo - Bring Smoke (Knock2 Edit)', 'S6789', 170)))
+        self.assertIsNotNone(pi.score_candidate(
+            {'title': 'SMOKE ALT [SKRLX TOOLS]', 'artist': 'Skrillex/ISOxo', 'duration': 185},
+            self.cand('Skrillex & ISOxo - Smoke (Alt Version)', 'Skrillex', 184)))
+
+    def test_cjk_without_spaces_and_traditional_simplified(self):
+        # 中文标题不分词:"周杰倫晴天" 也要能命中
+        self.assertIsNotNone(pi.score_candidate({'title': '晴天', 'artist': '周杰伦', 'duration': 269},
+                                                self.cand('周杰伦晴天MV', 'x', 270)))
+        # 简繁写法不同:时长几乎一致 + 歌手对得上时放行
+        self.assertIsNotNone(pi.score_candidate({'title': '灰色头像', 'artist': '許嵩', 'duration': 270},
+                                                self.cand('許嵩《灰色頭像》', 'x', 271)))
+
     def test_search_failure_is_unmatched(self):
         def boom(q):
             raise OSError('no network')
         self.assertIsNone(pi.match_on_youtube(self.TRACK, search=boom))
+
+
+class SpotifyListTest(unittest.TestCase):
+    EMBED = ('<html><script id="__NEXT_DATA__" type="application/json">' + __import__('json').dumps(
+        {'props': {'pageProps': {'state': {'data': {'entity': {'name': "That's my 00s", 'trackList': [
+            {'title': 'Poker Face', 'subtitle': 'Lady Gaga', 'duration': 237200},
+            {'title': 'Love The Way You Lie', 'subtitle': 'Eminem, Rihanna', 'duration': 263373}]}}}}}})
+        + '</script></html>')
+
+    def setUp(self):
+        self._saved = var.config
+        var.config = configparser.ConfigParser()
+        var.config.read_dict({'spotify': {'client_id': '', 'client_secret': ''}})
+
+    def tearDown(self):
+        var.config = self._saved
+
+    def fake_get(self, n_tracks=None):
+        html = self.EMBED
+        if n_tracks:
+            import json as _j
+            tracks = [{'title': f'T{i}', 'subtitle': 'A', 'duration': 1000} for i in range(n_tracks)]
+            data = {'props': {'pageProps': {'state': {'data': {'entity': {'name': 'Big', 'trackList': tracks}}}}}}
+            html = f'<script id="__NEXT_DATA__" type="application/json">{_j.dumps(data)}</script>'
+        return mock.Mock(text=html, raise_for_status=lambda: None)
+
+    def test_embed_page_needs_no_credentials(self):
+        with mock.patch('playlist_import.requests.get', return_value=self.fake_get()) as get:
+            title, tracks, truncated = pi.list_spotify('https://open.spotify.com/playlist/1RO0QF4WVKhEbho9x4SjB3?si=x')
+        self.assertIn('/embed/playlist/1RO0QF4WVKhEbho9x4SjB3', get.call_args[0][0])
+        self.assertEqual(title, "That's my 00s")
+        self.assertEqual(tracks[1], {'title': 'Love The Way You Lie', 'artist': 'Eminem, Rihanna', 'duration': 263.373})
+        self.assertFalse(truncated)
+
+    def test_hundred_tracks_flagged_without_creds_and_spotdl_used_with_creds(self):
+        with mock.patch('playlist_import.requests.get', return_value=self.fake_get(100)):
+            _, tracks, truncated = pi.list_spotify('https://open.spotify.com/playlist/x')
+        self.assertEqual((len(tracks), truncated), (100, True))
+        var.config.read_dict({'spotify': {'client_id': 'id', 'client_secret': 'secret'}})
+        full = [{'name': f'T{i}', 'artist': 'A', 'duration': 1} for i in range(150)]
+        with mock.patch('playlist_import.requests.get', return_value=self.fake_get(100)), \
+                mock.patch('media.spotify.list_spotify_tracks', return_value=full):
+            _, tracks, truncated = pi.list_spotify('https://open.spotify.com/playlist/x')
+        self.assertEqual((len(tracks), truncated), (150, False))
 
 
 class JobTest(unittest.TestCase):
@@ -86,8 +168,10 @@ class JobTest(unittest.TestCase):
         job_id = 'j1'
         pi._jobs[job_id] = {'id': job_id, 'owner': 'a@x.com', 'url': url, 'source': pi.detect_source(url),
                             'status': 'listing', 'total': 0, 'processed': 0, 'matched': 0, 'started': time.time()}
-        lister = {'netease': 'list_netease', 'spotify': 'list_spotify', 'youtube': 'list_youtube'}[pi.detect_source(url)]
-        with mock.patch(f'playlist_import.{lister}', return_value=('Src', tracks)):
+        source = pi.detect_source(url)
+        lister = {'netease': 'list_netease', 'spotify': 'list_spotify', 'youtube': 'list_youtube'}[source]
+        result = ('Src', tracks, False) if source == 'spotify' else ('Src', tracks)
+        with mock.patch(f'playlist_import.{lister}', return_value=result):
             pi.run_import(job_id, 'a@x.com', url, playlist_id, name, search=search)
         return pi._jobs[job_id]
 
@@ -121,10 +205,9 @@ class JobTest(unittest.TestCase):
         job_id = 'j2'
         pi._jobs[job_id] = {'id': job_id, 'owner': 'a@x.com', 'source': 'spotify', 'status': 'listing',
                             'total': 0, 'processed': 0, 'matched': 0, 'started': time.time()}
-        with mock.patch('playlist_import.list_spotify',
-                        side_effect=RuntimeError('spotify client_id/client_secret not configured')):
+        with mock.patch('playlist_import.list_spotify_embed', side_effect=RuntimeError('embed down')):
             pi.run_import(job_id, 'a@x.com', 'https://open.spotify.com/playlist/x', None, None)
-        self.assertEqual(pi._jobs[job_id]['error'], 'spotify_not_configured')
+        self.assertEqual(pi._jobs[job_id]['error'], 'list_failed')
 
 
 class ApiTest(unittest.TestCase):

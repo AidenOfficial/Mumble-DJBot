@@ -107,7 +107,7 @@ const importJob = ref<ImportJob | null>(null)
 const importError = ref('')
 const IMPORT_ERRORS: Record<string, string> = {
   unsupported_source: 'Paste a YouTube playlist, NetEase Cloud Music playlist, or Spotify playlist/album link.',
-  spotify_not_configured: 'Spotify import needs [spotify] client_id / client_secret in configuration.ini.',
+  spotify_not_configured: "Couldn't read that Spotify playlist — is it public?",
   list_failed: "Couldn't read that playlist — is it public?",
   no_entries: 'That playlist is empty (or private).',
   too_many_playlists: 'You already have the maximum number of playlists.',
@@ -134,7 +134,8 @@ async function runImport() {
     await reloadPlaylists()
     if (job.playlist_id) await select(job.playlist_id)
     say(`Imported ${job.added} song${job.added === 1 ? '' : 's'}` +
-        (job.unmatched?.length ? ` · ${job.unmatched.length} not found on YouTube` : ''))
+        (job.unmatched?.length ? ` · ${job.unmatched.length} not found on YouTube` : '') +
+        (job.note === 'spotify_truncated' ? ' · only the first 100 (add Spotify API keys for the full list)' : ''))
   } catch (e) {
     importError.value = IMPORT_ERRORS[e instanceof Error ? e.message : ''] ?? 'Import failed.'
   }

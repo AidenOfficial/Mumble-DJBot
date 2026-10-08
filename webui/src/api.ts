@@ -289,6 +289,7 @@ export interface ImportJob {
   source_title?: string
   unmatched?: string[]
   error?: string
+  note?: 'spotify_truncated'
 }
 
 export async function startImport(url: string, playlistId?: number): Promise<string> {

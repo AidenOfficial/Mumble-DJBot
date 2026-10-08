@@ -111,7 +111,10 @@ access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
 - 网易云在海外基本没有音源,Spotify 本身不提供音频,所以这两个只读歌名/歌手/时长,
   再去 YouTube 按"时长接近 + 官方频道优先 + 排除翻唱/现场/AMV"挑最像的一个。
   找不到的会列出来。导入几百首大约要一两分钟,页面上有进度。
-- Spotify 需要 `[spotify] client_id / client_secret`(和 `!spotify` 命令用的是同一套)。
+- Spotify 歌单 100 首以内不需要任何凭据(读公开嵌入页);超过 100 首时,配置了
+  `[spotify] client_id / client_secret`(和 `!spotify` 命令同一套)才能读完整列表,否则只导入前 100 首。
+- 实测(2026-10-08):网易云 265 首匹配 262 首、Spotify 79 首匹配 77 首、YouTube 9/9;
+  每 100 首匹配约 30 秒。
 
 ## 绑定 Mumble 账号
 
