@@ -76,6 +76,21 @@ access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
 开启后每个请求都校验 `Cf-Access-Jwt-Assertion`,没有合法 JWT 的一律 403
 (局域网直连也会被拒,这是预期行为)。
 
+## 频道与跟随(Settings 页)
+
+- 实时显示服务器的频道树和每个频道里的人(bot 自己高亮,其他 bot 置灰)。
+- **☆ Default**:设为默认频道,启动和 `!oust` 时回到这里;优先于 `[server] channel`。
+- **Move here**:让 bot 立刻过去。
+- 跟随模式:
+  - *Stay put*:不动(默认)。
+  - *Follow the crowd*:bot 所在频道没人了(只剩 bot / `when_nobody_in_channel_ignore` 里的 bot),
+    就去最后离开的那个人去的频道;那人下线了就去人最多的频道。
+  - *Follow someone*:始终跟着指定的人;对方离线时按 *Follow the crowd* 处理。
+  - 可选"服务器上一个人都没有时回默认频道"。
+- 有人换频道后等 2.5 秒再决定,来回切频道不会把 bot 带着乱跑。
+- 开着跟随时,`when_nobody_in_channel = pause/stop` 不会在 bot 即将跟过去时误暂停/清空队列。
+- bot 需要有进入目标频道的权限(Mumble ACL),没权限的频道服务器会拒绝移动。
+
 ## 缓存与上传
 
 - **Cache** 页:下载缓存占用、每首的大小/播放次数/最后使用时间。📌 固定 = 自动清理永不删除;

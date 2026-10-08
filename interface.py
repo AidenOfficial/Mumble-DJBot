@@ -66,6 +66,7 @@ class ReverseProxied(object):
 
 import web_api
 import web_cache
+import web_channels
 import web_upload
 import web_users
 from web_users import current_user_name
@@ -200,6 +201,7 @@ web.register_blueprint(web_api.create_blueprint(requires_auth))
 web.register_blueprint(web_users.create_blueprint(requires_auth))
 web.register_blueprint(web_cache.create_blueprint(requires_auth))
 web.register_blueprint(web_upload.create_blueprint(requires_auth))
+web.register_blueprint(web_channels.create_blueprint(requires_auth))
 
 
 def tag_color(tag):

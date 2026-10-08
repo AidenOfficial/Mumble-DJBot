@@ -220,3 +220,45 @@ export function formatBytes(n: number): string {
   const v = n / 1024 ** i
   return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`
 }
+
+// ---- 频道 / 跟随 ---------------------------------------------------------
+
+export interface ChannelUser {
+  session: number
+  name: string
+  is_me: boolean
+  is_bot: boolean
+  muted: boolean
+  deafened: boolean
+}
+
+export interface ChannelNode {
+  id: number
+  name: string
+  path: string[]
+  temporary: boolean
+  users: ChannelUser[]
+  children: ChannelNode[]
+}
+
+export type FollowMode = 'off' | 'auto' | 'user'
+
+export interface ChannelOverview {
+  tree: ChannelNode | null
+  current_channel_id: number | null
+  settings: {
+    default_path: string[]
+    default_channel_id: number | null
+    follow: FollowMode
+    follow_user: string
+    return_home: boolean
+  }
+  online_users: string[]
+}
+
+export const fetchChannels = () => getJson<ChannelOverview>('/api/channels')
+export const saveChannelSettings = (body: Partial<{
+  default_channel_id: number; follow: FollowMode; follow_user: string; return_home: boolean
+}>) => send<ChannelOverview>('POST', '/api/channels/settings', body)
+export const joinChannel = (channel_id: number) =>
+  send<ChannelOverview>('POST', '/api/channels/join', { channel_id })

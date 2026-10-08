@@ -8,14 +8,15 @@ import LibraryPage from './components/LibraryPage.vue'
 import PlaylistsPage from './components/PlaylistsPage.vue'
 import UserChip from './components/UserChip.vue'
 import CachePage from './components/CachePage.vue'
+import SettingsPage from './components/SettingsPage.vue'
 
 type Theme = 'light' | 'dark' | 'auto'
 const theme = ref<Theme>('auto')
 
-type View = 'home' | 'search' | 'library' | 'lists' | 'stats' | 'cache'
-const VIEWS: View[] = ['home', 'search', 'library', 'lists', 'stats', 'cache']
+type View = 'home' | 'search' | 'library' | 'lists' | 'stats' | 'cache' | 'settings'
+const VIEWS: View[] = ['home', 'search', 'library', 'lists', 'stats', 'cache', 'settings']
 const VIEW_LABEL: Record<View, string> = {
-  home: 'Now Playing', search: 'Search', library: 'Library', lists: 'Playlists', stats: 'Stats', cache: 'Cache',
+  home: 'Now Playing', search: 'Search', library: 'Library', lists: 'Playlists', stats: 'Stats', cache: 'Cache', settings: 'Settings',
 }
 const view = ref<View>('home')
 
@@ -100,6 +101,7 @@ onMounted(() => {
       <LibraryPage v-else-if="view === 'library'" />
       <PlaylistsPage v-else-if="view === 'lists'" />
       <CachePage v-else-if="view === 'cache'" />
+      <SettingsPage v-else-if="view === 'settings'" />
       <StatsPage v-else />
     </main>
   </div>
