@@ -53,9 +53,42 @@ docker compose logs -f cloudflared               # 看到 "Registered tunnel con
    策略按邮箱/组放行;Session 时长按需(如 24h)。
 3. (可选)Access → Service Auth 为自动化脚本发 Service Token。
 
+## 用户身份、别名与个人歌单
+
+Cloudflare Access 回源时会带上登录者邮箱(`Cf-Access-Authenticated-User-Email`),
+Web UI 据此识别"是谁":
+
+- 右上角头像 → 设置**别名**(显示名)。在 Web 上点的歌,Mumble 里和统计页都显示别名;
+  不设则用邮箱 @ 前面的部分。别名全站唯一(不分大小写),不能含 `< > & "`。
+- **Playlists** 页:每个人自己的歌单。任意页面歌曲旁的 ♡ 可加入歌单,也可以把当前
+  整个队列存成歌单;歌单可"立即播放 / 随机 / 追加到队列 / 单曲插播"。
+- 没有经过 Access(例如局域网直连 8181)时是"Guest":能点歌,没有歌单。
+
+**可选加固:校验 Access JWT。** 只读请求头的前提是 8181 不对外暴露(只能经 Tunnel 访问)。
+想彻底防伪造,在 `configuration.ini` 加:
+
+```ini
+[webinterface]
+access_team_domain = <你的团队名>.cloudflareaccess.com
+access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
+```
+
+开启后每个请求都校验 `Cf-Access-Jwt-Assertion`,没有合法 JWT 的一律 403
+(局域网直连也会被拒,这是预期行为)。
+
+## 缓存与上传
+
+- **Cache** 页:下载缓存占用、每首的大小/播放次数/最后使用时间。📌 固定 = 自动清理永不删除;
+  💾 = 复制进本地曲库(`music_folder/saved/`);超过 `tmp_folder_max_size`(默认 4GB)时
+  按"最久没用"淘汰,播放 ≥3 次的歌最后才淘汰。
+- **上传**(Library 页 Upload):分片上传(每片 32MB),不受 Cloudflare 单请求 100MB 限制,
+  断网会自动续传;单文件上限 `max_upload_file_size`(默认 4G)。视频默认只保留音轨
+  (`upload_extract_audio`),上传完直接进曲库,不用 rescan。
+
 ## 验证清单(部署后手动)
 
 - [ ] 域名打开即新 UI,`/legacy` 是旧界面,未登录时被 Access 拦截。
 - [ ] 直连 NAS IP:8181 从公网不可达(仅 Tunnel 出站)。
 - [ ] `/api/status` 轮询正常、控件/队列/搜索/统计各页可用。
-- [ ] 上传大小上限 `max_upload_file_size` 符合预期。
+- [ ] 上传大小上限 `max_upload_file_size` 符合预期;上传一个 >100MB 的视频能成功并只剩音轨。
+- [ ] 右上角显示的是自己的 Access 邮箱;设置别名后点一首歌,Mumble 里显示别名。

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
+import { formatBytes } from '../api'
+import { uploadFile, UploadError } from '../upload'
 import { useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
 
@@ -25,7 +27,6 @@ const totalPages = ref(0)
 const page = ref(1)
 const loading = ref(false)
 const feedback = ref<Record<string, string>>({})
-const uploadMsg = ref('')
 
 onMounted(async () => {
   try {
@@ -84,27 +85,72 @@ async function add(item: LibItem, next: boolean) {
   setTimeout(() => delete feedback.value[item.id], 2000)
 }
 
+interface UploadRow {
+  key: number
+  name: string
+  sent: number
+  total: number
+  phase: 'uploading' | 'processing' | 'done' | 'error'
+  message: string
+  itemId?: string
+  queued?: boolean
+  ctrl: AbortController
+}
+const uploads = ref<UploadRow[]>([])
+let uploadSeq = 0
+
+const UPLOAD_ERRORS: Record<string, string> = {
+  too_large: 'File is larger than the upload limit.',
+  unsupported_type: 'Only audio or video files can be uploaded.',
+  no_space: 'Not enough disk space on the bot.',
+  network: 'Network keeps failing — try again later.',
+  aborted: 'Cancelled.',
+}
+
 async function onUpload(e: Event) {
   const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  uploadMsg.value = 'Uploading...'
-  const form = new FormData()
-  form.append('file', file)
-  form.append('targetdir', 'uploads/')
-  try {
-    const rv = await fetch('../upload', { method: 'POST', body: form })
-    if (rv.status === 409) uploadMsg.value = 'Already exists.'
-    else if (!rv.ok) throw new Error(String(rv.status))
-    else {
-      uploadMsg.value = 'Uploaded ✓ (rescan to index)'
-      query(page.value)
-    }
-  } catch {
-    uploadMsg.value = 'Upload failed.'
-  }
+  const files = Array.from(input.files ?? [])
   input.value = ''
-  setTimeout(() => (uploadMsg.value = ''), 4000)
+  // 依次上传,避免多个大文件同时抢带宽
+  for (const file of files) {
+    const row = reactive<UploadRow>({
+      key: ++uploadSeq, name: file.name, sent: 0, total: file.size, phase: 'uploading',
+      message: '', ctrl: new AbortController(),
+    })
+    uploads.value.unshift(row)
+    try {
+      const rv = await uploadFile(file, (p) => {
+        row.sent = p.sent
+        row.phase = p.phase
+      }, { signal: row.ctrl.signal })
+      if (rv.status === 'done') {
+        row.phase = 'done'
+        row.itemId = rv.item_id
+        row.message = rv.extracted
+          ? `Saved audio only (${formatBytes(rv.final_size ?? 0)})`
+          : `Saved as ${rv.path}`
+        query(page.value)
+      } else {
+        row.phase = 'error'
+        row.message = rv.error ?? 'Processing failed.'
+      }
+    } catch (err) {
+      row.phase = 'error'
+      row.message = err instanceof UploadError ? (UPLOAD_ERRORS[err.code] ?? `Upload failed (${err.code}).`) : 'Upload failed.'
+    }
+  }
+}
+
+async function queueUpload(row: UploadRow) {
+  if (!row.itemId) return
+  try {
+    const rv = await fetch('../post', { method: 'POST', body: new URLSearchParams({ add_item_bottom: row.itemId }) })
+    if (!rv.ok) throw new Error()
+    row.queued = true
+    refresh()
+  } catch {
+    row.message = 'Could not add to the queue.'
+  }
 }
 
 const TYPES = [
@@ -155,10 +201,36 @@ const TYPES = [
           :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
         >
           Upload
-          <input type="file" accept="audio/*,video/*" class="hidden" @change="onUpload" />
+          <input type="file" accept="audio/*,video/*,.mkv,.flv" multiple class="hidden" @change="onUpload" />
         </label>
       </div>
-      <p v-if="uploadMsg" class="text-xs" :style="{ color: 'var(--c-text-muted)' }">{{ uploadMsg }}</p>
+      <!-- 上传进度 -->
+      <ul v-if="uploads.length" class="flex flex-col gap-1.5">
+        <li v-for="u in uploads" :key="u.key" class="rounded-xl px-3 py-2"
+            :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="min-w-0 flex-1 truncate font-medium" :title="u.name">{{ u.name }}</span>
+            <span class="shrink-0 tabular-nums" :style="{ color: 'var(--c-text-muted)' }">
+              <template v-if="u.phase === 'uploading'">{{ formatBytes(u.sent) }} / {{ formatBytes(u.total) }}</template>
+              <template v-else-if="u.phase === 'processing'">Processing…</template>
+            </span>
+            <button v-if="u.phase === 'uploading'" class="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-xs"
+                    :style="{ color: 'var(--c-text-faint)' }" title="Cancel" @click="u.ctrl.abort()">✕</button>
+            <button v-if="u.phase === 'done' && u.itemId && !u.queued"
+                    class="shrink-0 cursor-pointer rounded-md border-0 px-2 py-0.5 text-xs font-semibold"
+                    :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
+                    @click="queueUpload(u)">+ Queue</button>
+            <span v-if="u.queued" class="shrink-0" :style="{ color: 'var(--c-accent)' }">Queued ✓</span>
+          </div>
+          <div v-if="u.phase === 'uploading' || u.phase === 'processing'" class="mt-1.5 h-1 w-full overflow-hidden rounded-full"
+               :style="{ background: 'var(--c-surface-2)' }">
+            <div class="h-full rounded-full" :class="u.phase === 'processing' ? 'animate-pulse' : ''"
+                 :style="{ width: `${u.total ? (u.sent / u.total) * 100 : 0}%`, background: 'var(--c-accent)', transition: 'width 300ms' }" />
+          </div>
+          <p v-if="u.message" class="mt-1 text-xs"
+             :style="{ color: u.phase === 'error' ? 'var(--c-danger)' : 'var(--c-success)' }">{{ u.message }}</p>
+        </li>
+      </ul>
     </div>
 
     <!-- results -->

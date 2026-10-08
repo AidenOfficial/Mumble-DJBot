@@ -97,7 +97,7 @@ client_secret = <你的 Spotify Client Secret>
 **说明:**
 - 不填 `[spotify]` 也能启动,只是 `!spotify` 命令会提示未配置;`!bili` 不受影响。
 - 想播本地音乐文件的话,把文件放进 `/opt/botamusique/music_folder/` 即可。
-- 想播超过 60 分钟的长视频:在 `[bot]` 段加一行 `max_track_duration = 180`(单位分钟)。
+- 长视频默认**不限时长**(`max_track_duration = 0`),超过 5 分钟的视频会边下边播。以前按旧说明在 `[bot]` 段加过 `max_track_duration = 180` 的,删掉那一行即可解除限制。
 - 响度均衡(让大小声不一的歌音量趋于一致)默认已开启;如想关闭,在 `[bot]` 段加 `normalize_volume = False`。
 
 ---
