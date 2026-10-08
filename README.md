@@ -1,81 +1,131 @@
 <div align="center">
-<img src="static/image/logo.png" alt="Mumble-DJBot" width="160px" />
+<img src="static/image/logo.png" alt="Mumble-DJBot logo" width="160px" />
 <h1>Mumble-DJBot</h1>
-<p>给 <a href="https://www.mumble.info/">Mumble</a> 频道放歌的机器人：聊天命令点歌，网页上管队列、歌单和缓存。</p>
+<p>A self-hosted music bot for <a href="https://www.mumble.info/">Mumble</a>, controlled from chat and a web interface.</p>
+
+<p>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+<img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12" />
+<img src="https://img.shields.io/badge/deploy-Docker-2496ED.svg" alt="Docker" />
+</p>
+
+<p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
-本项目 fork 自 [azlux/botamusique](https://github.com/azlux/botamusique)（上游已归档）。在它的基础上重写了 Web 界面，加了个人歌单、歌单导入、边下边播、频道跟随等功能，并按 Docker + Cloudflare Tunnel 的部署方式整理过。
+---
 
-## 功能
+Mumble-DJBot joins a Mumble channel and plays audio from YouTube, Bilibili, Spotify, live streams, internet radio and a local music library. Users request songs from chat or from a browser-based dashboard, which also provides queue management, personal playlists, cache management and listening statistics.
 
-**音源**
-- YouTube、Bilibili（BV 号 / 链接）、SoundCloud 等 yt-dlp 支持的站点，以及它们的播放列表。
-- Spotify 歌曲 / 歌单 / 关键词（经 spotdl 到 YouTube 取音频）。
-- 直播（`!live`）、网络电台（含 radio-browser.info 搜索）、本地曲库文件。
+The project is a fork of [azlux/botamusique](https://github.com/azlux/botamusique), which has been archived upstream. This fork replaces the web interface, adds per-user playlists, playlist import, stream-while-downloading and channel following, and is designed to be deployed with Docker behind Cloudflare Tunnel and Cloudflare Access.
 
-**播放**
-- 长视频边下边播：攒够约 30 秒音频就开播，剩下的在后台继续下载。B 站 50 分钟视频从点歌到出声约 6 秒。
-- 自动跳过非音乐片段（SponsorBlock / BilibiliSponsorBlock 社区标注的片头说话、赞助口播等）。
-- 队列预下载、音量标准化（loudnorm）、有人说话时自动压低音量（ducking）、立体声。
-- 播放模式：顺序、循环、单曲循环、随机、自动（从曲库随机挑）。
+## Table of Contents
 
-**频道**
-- 设置页能看到服务器的频道树，可以设默认频道，或让 bot 立刻移过去。
-- 跟随模式：频道没人时跟着最后离开的人走，或始终跟着指定的人。
-- 频道里连续 5 分钟没人自动暂停，有人回来自动继续。
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Web Interface and Remote Access](#web-interface-and-remote-access)
+- [Security Considerations](#security-considerations)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
 
-**Web 界面**（`/`，旧界面保留在 `/legacy`）
-- Now Playing（封面、进度、等待开播的阶段和预计时间）、队列拖拽排序、YouTube + B 站统一搜索。
-- 曲库浏览和分片上传：单文件默认上限 4 GB，断网自动续传，视频只保留音轨。
-- 缓存管理：查看每首的占用和播放次数，可以固定常听的歌或存进曲库。超过上限时按"最久没用"淘汰，常听的歌最后才淘汰。
-- 播放统计：最常放、谁点得最多、什么时段最热闹、最常被跳过。
+## Features
 
-**个人歌单**
-- 用 Cloudflare Access 登录的邮箱识别身份，可以给自己设别名。
-- 每人有自己的歌单，可以"立即播放 / 随机 / 追加到队列"。
-- 导入 YouTube 播放列表、网易云音乐 / QQ 音乐歌单、Spotify 歌单 / 专辑。网易云、QQ 音乐和 Spotify 的歌会自动到 YouTube 匹配音源，简繁体标题都能匹配。
-- 网页上生成绑定码后，在 Mumble 里发 `!bind` 绑定账号，之后可以在聊天里用 `!mylist`、`!fav` 操作自己的歌单。
+### Audio sources
 
-**稳定性**
-- 看门狗：主循环卡住超过 120 秒自动退出，由 Docker 拉起。另有心跳文件供健康检查使用。
-- 下载失败自动续传重试，单首歌出错不影响整个进程。
+- YouTube, Bilibili (BV identifiers or URLs), SoundCloud and other sites supported by [yt-dlp], including their playlists.
+- Spotify tracks, playlists and keyword search, resolved to audio via [spotDL].
+- Live streams, internet radio (including [radio-browser.info](https://www.radio-browser.info/) search) and local audio files.
 
-## 快速开始（Docker）
+### Playback
 
-推荐用 Docker 部署，所有依赖（Python 3.12、ffmpeg、opus、yt-dlp、spotdl、Deno）都在镜像里。bot 是主动连出到 Mumble 服务器的客户端，不需要映射端口。
+- **Stream while downloading.** Playback of long videos starts once roughly 30 seconds of audio is available, and the rest is downloaded in the background. In testing, a 50-minute Bilibili video started playing about 6 seconds after it was requested.
+- **Non-music segment skipping.** Segments marked by the [SponsorBlock] and [BilibiliSponsorBlock] communities, such as spoken intros and sponsor reads, are skipped automatically.
+- Queue prefetching, loudness normalization (`loudnorm`), automatic volume ducking while users speak, and stereo output.
+- Five playback modes: one-shot, repeat, single-track loop, random and autoplay (random tracks from the library).
+
+### Channel management
+
+- The server's channel tree is shown live in the web interface. From there you can set a default channel or move the bot.
+- Follow modes: follow the last user to leave an empty channel, or always follow a chosen user.
+- Playback pauses automatically after a configurable idle period (5 minutes by default) and resumes when someone returns.
+
+### Web interface
+
+The dashboard is served at `/`. The original interface remains available at `/legacy`.
+
+- **Now Playing:** artwork, progress, and a preparation panel that shows the current stage and the estimated time until playback starts.
+- **Queue:** drag-and-drop reordering, plus unified search across YouTube and Bilibili.
+- **Library:** browsing and resumable chunked uploads (up to 4 GB per file by default). Audio is extracted from video files.
+- **Cache:** storage use and play counts. Frequently played tracks can be pinned or saved to the library. When the size limit is reached, the least recently used tracks are evicted first.
+- **Statistics:** most played tracks, top requesters, busiest hours and most skipped tracks.
+
+### Personal playlists
+
+- Users are identified by the email address that Cloudflare Access passes through, and can set a display alias.
+- Each user has their own playlists, which can be played immediately, shuffled or appended to the queue.
+- Playlists can be imported from YouTube, NetEase Cloud Music, QQ Music and Spotify. Tracks from the last three are matched to YouTube sources, and matching handles both Simplified and Traditional Chinese titles.
+- A Mumble account can be linked to the web identity with a one-time code (`!bind`). Linked users can manage their playlists from chat with `!mylist` and `!fav`.
+
+### Reliability
+
+- A watchdog restarts the process if the main loop stalls for more than 120 seconds, and a heartbeat file supports container health checks.
+- Failed downloads are resumed and retried. A failure in one track does not affect the rest of the process.
+
+## Requirements
+
+- A Mumble server (Murmur) that the bot can reach.
+- **Docker deployment (recommended):** Docker Engine with Docker Compose. Every runtime dependency is included in the image.
+- **Bare-metal deployment:** Python 3.12, FFmpeg and the Opus codec. See [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+- **Optional:** Spotify API credentials, required only for the `!spotify` command.
+- **Optional:** a Cloudflare account, for remote access to the web interface.
+
+## Installation
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/AidenOfficial/Mumble-DJBot.git
 cd Mumble-DJBot
-cp configuration.example.ini configuration.ini   # 必须在 up 之前建好，否则 Docker 会把它挂成目录
-nano configuration.ini
 ```
 
-最小配置。没写的项从 `configuration.default.ini` 取默认值，**不要改那个文件**：
+### 2. Create the configuration file
+
+```bash
+cp configuration.example.ini configuration.ini
+```
+
+> [!IMPORTANT]
+> `configuration.ini` must exist before the container is started. Otherwise Docker creates a directory in its place and the bot cannot read its configuration.
+
+A minimal configuration is shown below. Any option you leave out falls back to `configuration.default.ini`, which should not be edited.
 
 ```ini
 [server]
 host = mumble.example.com
 port = 64738
-;password = 服务器密码
-channel = 音乐频道        ; 多级频道写成 Games/Squad
+; password = <server password>
+channel = Music              ; use a slash for nested channels, e.g. Games/Squad
 
 [bot]
 username = MusicBot
-admin = 你的Mumble用户名  ; 多个用分号隔开
-language = zh_CN
+admin = YourMumbleName       ; separate multiple administrators with semicolons
+language = en_US             ; zh_CN, ja_JP, fr_FR, de_DE, ... (see lang/)
 
 [webinterface]
 enabled = True
-listening_addr = 0.0.0.0  ; 容器内要监听所有地址，由 compose 网络隔离
+listening_addr = 0.0.0.0     ; required inside the container; isolated by the Compose network
 
-; 只有 !spotify 命令需要。导入 100 首以内的 Spotify 歌单不需要
 [spotify]
+; Required only for the !spotify command. Spotify playlists of up to
+; 100 tracks can be imported without credentials.
 client_id =
 client_secret =
 ```
 
-启动：
+### 3. Build and start
 
 ```bash
 docker compose build
@@ -83,75 +133,90 @@ docker compose up -d
 docker compose logs -f
 ```
 
-进同一个频道发 `!help` 就能看到全部命令。
+The bot connects to the server as a regular client, so no ports need to be published. To confirm that it is running, join its channel and send `!help`.
 
-容器每次启动都会把 yt-dlp / spotdl 升级到最新（`BAM_UPDATE_ON_START=1`）。B 站和 YouTube 经常改版，建议每天定时 `docker restart mumble-music` 一次。
+### 4. Keep extractors up to date
 
-完整步骤（绿联 NAS、cookies、日常运维）见 [`deploy/DOCKER.md`](deploy/DOCKER.md)。不用 Docker、直接装在 Ubuntu 上的步骤见 [`deploy/DEPLOY.md`](deploy/DEPLOY.md)。
+On every start, the container upgrades yt-dlp and spotDL (`BAM_UPDATE_ON_START=1`). YouTube and Bilibili change often, so restart the container once a day, for example with a cron entry:
 
-## Web 界面与公网访问
-
-推荐的公网发布方式是 Cloudflare Tunnel + Access：登录鉴权交给 Cloudflare，8181 端口不暴露。
-
-```bash
-echo 'CLOUDFLARE_TUNNEL_TOKEN=eyJh...' > .env
-docker compose --profile tunnel up -d
+```cron
+0 5 * * * docker restart mumble-music
 ```
 
-Cloudflare 控制台里 Tunnel 的回源地址填 `http://botamusique:8181`，再建一个 Access 应用按邮箱放行。详细步骤见 [`deploy/WEBUI.md`](deploy/WEBUI.md)。
+For NAS deployment, cookies and routine maintenance, see [`deploy/DOCKER.md`](deploy/DOCKER.md).
 
-> [!IMPORTANT]
-> 默认 `auth_method = none`，应用本身不做登录，全靠 Cloudflare Access 挡在前面：
-> - **不要把 8181 端口直接暴露到公网或不可信的局域网。**
-> - 建议在 `[webinterface]` 里填上 `access_team_domain` 和 `access_aud`，开启 Access JWT 校验。开启后，绕过 Tunnel 直连的请求无法伪造登录身份。
-> - 改用 `auth_method = token` 时，一定要把 `flask_secret` 换成随机字符串。
+## Web Interface and Remote Access
 
-## 聊天命令
+The recommended way to expose the web interface is Cloudflare Tunnel with Cloudflare Access. Cloudflare handles authentication, and port 8181 is never published.
 
-命令以 `!` 开头（全角 `！` 也可以），支持前缀匹配，比如 `!sk` 就是 `!skip`。在 `[commands]` 里可以改名。下面是常用的，完整列表发 `!help`。
+1. In the Cloudflare Zero Trust dashboard, create a tunnel. Set its public hostname to point to `http://botamusique:8181`.
+2. Create an Access application for the same hostname, with a policy that allows the intended email addresses.
+3. Save the tunnel token and start the `tunnel` profile:
 
-| 命令 | 作用 |
+   ```bash
+   echo 'CLOUDFLARE_TUNNEL_TOKEN=<token>' > .env
+   docker compose --profile tunnel up -d
+   ```
+
+For detailed instructions, see [`deploy/WEBUI.md`](deploy/WEBUI.md).
+
+## Security Considerations
+
+> [!WARNING]
+> The default `auth_method = none` performs no authentication in the application itself. It relies entirely on Cloudflare Access.
+
+- **Do not expose port 8181** to the internet or to untrusted networks.
+- **Enable Access JWT verification** by setting `access_team_domain` and `access_aud` under `[webinterface]`. The bot then rejects any request without a valid Access token, so traffic that bypasses the tunnel cannot impersonate a user.
+- **Change `flask_secret`** to a long random value if you switch to `auth_method = token`, since it signs the session cookies.
+- **Register administrator accounts** on the Mumble server. Administrators are currently identified by display name, so an unregistered name can be taken by another user while the administrator is offline.
+
+## Usage
+
+### Chat commands
+
+Commands start with `!`; the full-width `！` is also accepted. Any unambiguous prefix works, so `!sk` runs `!skip`. Commands can be renamed in the `[commands]` section. Send `!help` for the complete list.
+
+| Command | Description |
 |---|---|
-| `!url <链接>` / `!bili <BV号或链接>` | 点一首 YouTube / B 站视频的音频 |
-| `!yplay <关键词>` / `!ysearch <关键词>` | 搜 YouTube 并直接加第一条 / 列出结果 |
-| `!spotify <链接或关键词>` | Spotify 歌曲、歌单或搜索 |
-| `!playlist <链接>` | 加入整个播放列表 |
-| `!live <链接>` / `!radio <名字或链接>` | 直播 / 网络电台 |
-| `!file <路径>` / `!filematch <关键词>` | 从本地曲库添加 |
-| `!play [序号]` / `!pause` / `!skip` / `!stop` | 播放控制 |
-| `!queue` / `!np` / `!rm <序号>` | 看队列 / 当前曲 / 删除 |
-| `!mode <1-5>` | 顺序 / 循环 / 随机 / 自动 / 单曲循环 |
-| `!repeat [次数]` | 把当前曲再排几遍（最多 20） |
-| `!volume <0-100>` / `!duck on\|off` | 音量 / 说话时压低音量 |
-| `!joinme` / `!oust` | 叫 bot 来自己的频道 / 停止并回默认频道 |
-| `!bind <绑定码>` / `!mylist [歌单] [shuffle]` / `!fav [歌单]` | 个人歌单（先在网页上生成绑定码） |
-| `!web` | 获取网页地址 |
+| `!url <link>` / `!bili <BV or link>` | Add the audio of a YouTube or Bilibili video |
+| `!yplay <keywords>` / `!ysearch <keywords>` | Add the first YouTube result / list search results |
+| `!spotify <link or keywords>` | Add a Spotify track or playlist, or search Spotify |
+| `!playlist <link>` | Add an entire playlist |
+| `!live <link>` / `!radio <name or link>` | Play a live stream or an internet radio station |
+| `!file <path>` / `!filematch <keyword>` | Add tracks from the local library |
+| `!play [n]` / `!pause` / `!skip` / `!stop` | Playback control |
+| `!queue` / `!np` / `!rm <n>` | Show the queue / show the current track / remove a track |
+| `!mode <1–5>` | One-shot, repeat, random, autoplay or single-track loop |
+| `!repeat [n]` | Queue the current track again *n* times (maximum 20) |
+| `!volume <0–100>` / `!duck on\|off` | Set the volume / toggle ducking |
+| `!joinme` / `!oust` | Move the bot to your channel / stop and return to the default channel |
+| `!bind <code>` / `!mylist [name] [shuffle]` / `!fav [name]` | Personal playlists (generate the code in the web interface) |
+| `!web` | Show the web interface address |
 
-管理员（`[bot] admin` 里的用户）还可以用 `!kill`、`!update`、`!urlban`、`!userban`、`!maxvolume`、`!webuseradd` 等命令。
+Administrators listed in `[bot] admin` also have access to `!kill`, `!update`, `!urlban`, `!userban`, `!maxvolume`, `!webuseradd` and related commands.
 
-> [!NOTE]
-> 管理员目前按 Mumble 显示名判定。请把管理员账号在 Mumble 服务器上注册，否则别人可以在你离线时用同名登录冒充你。
+## Configuration
 
-## 常用配置
+[`configuration.example.ini`](configuration.example.ini) documents every option. The options most often changed are:
 
-所有选项及说明见 [`configuration.example.ini`](configuration.example.ini)。几个常改的：
-
-| 选项 | 默认 | 说明 |
+| Option | Default | Description |
 |---|---|---|
-| `[bot] stream_while_downloading` | `True` | 长视频边下边播（时长 ≥ `stream_min_duration` 秒的才启用） |
-| `[bot] tmp_folder_max_size` | `4096` | 下载缓存上限（MB），超出按最久没用淘汰 |
-| `[bot] max_track_duration` | `0` | 单曲时长上限（分钟），0 = 不限 |
-| `[bot] sponsorblock` | `True` | 跳过非音乐片段；分类见 `sponsorblock_categories` |
-| `[bot] when_nobody_in_channel` | `nothing` | 频道没人时立即 `pause` / `stop`；一般保持 `nothing`，用设置页里的"5 分钟后自动暂停" |
-| `[bot] playback_mode` | `one-shot` | 启动时的播放模式 |
-| `[webinterface] max_upload_file_size` | `4G` | 网页上传单文件上限 |
-| `[youtube_dl] cookie_file` | 空 | B 站大会员 / YouTube 登录 cookies（Netscape 格式） |
+| `[bot] stream_while_downloading` | `True` | Start long tracks before the download completes (applies to tracks of at least `stream_min_duration` seconds) |
+| `[bot] tmp_folder_max_size` | `4096` | Download cache limit in MB; least recently used entries are evicted first |
+| `[bot] max_track_duration` | `0` | Maximum track length in minutes; `0` disables the limit |
+| `[bot] sponsorblock` | `True` | Skip non-music segments; categories are set in `sponsorblock_categories` |
+| `[bot] when_nobody_in_channel` | `nothing` | Immediate action when the channel empties (`pause`, `stop`); the delayed auto-pause in the web settings is usually preferable |
+| `[bot] playback_mode` | `one-shot` | Playback mode at startup |
+| `[webinterface] max_upload_file_size` | `4G` | Maximum size of a single uploaded file |
+| `[youtube_dl] cookie_file` | *(empty)* | Netscape-format cookies for Bilibili premium content or signed-in YouTube access |
 
-默认频道、跟随模式、自动暂停在网页设置页里改，不用写进 ini。
+The default channel, follow mode and idle auto-pause are set on the web interface's Settings page and do not need to be configured in the INI file.
 
-## 开发
+## Development
 
-运行测试（不需要 Mumble 服务器，也不需要装 pymumble）：
+### Running the tests
+
+The test suite needs neither a Mumble server nor `pymumble`.
 
 ```bash
 python3.12 -m venv venv
@@ -159,38 +224,48 @@ venv/bin/pip install -r requirements.txt pytest
 venv/bin/python -m pytest tests
 ```
 
-需要 Python 3.12。pymumble 2.x 要求 ≥ 3.12，而 3.13 移除了 `audioop`，要用 3.13 就得另装 `audioop-lts`。
+Python 3.12 is required: pymumble 2.x needs Python 3.12 or later, and Python 3.13 removed the `audioop` module. If you use 3.13, install `audioop-lts` as well.
 
-Web 前端在 `webui/`，技术栈是 Vue 3 + TypeScript + Vite + Tailwind 4：
+### Building the web interface
+
+The dashboard is in `webui/` and is built with Vue 3, TypeScript, Vite and Tailwind CSS 4.
 
 ```bash
 cd webui
 npm ci
-npm run dev     # 开发服务器，/api 代理到 127.0.0.1:8181
-npm run build   # 产物在 webui/dist，随仓库提交
+npm run dev     # development server; proxies /api to 127.0.0.1:8181
+npm run build   # writes the production build to webui/dist
 ```
 
-Docker 构建时也会重新 build 一次前端。改完前端请把 `webui/dist` 一起提交，这样不用 Docker 的部署也能直接用。
+`webui/dist` is committed to the repository so that deployments without Node.js work. The Docker image rebuilds it during the image build. Commit the updated build together with any frontend change.
 
-不连 Mumble、只验证运行环境和 B 站 / Spotify 下载链路，可以跑 `scripts/smoke_test.py`，用法见 [`deploy/VERIFY.md`](deploy/VERIFY.md)。
+### Smoke test
 
-<details>
-<summary>代码结构</summary>
+`scripts/smoke_test.py` checks the runtime environment and the Bilibili and Spotify download paths without connecting to Mumble. See [`deploy/VERIFY.md`](deploy/VERIFY.md).
 
-| 路径 | 内容 |
+### Project structure
+
+| Path | Contents |
 |---|---|
-| `mumbleBot.py`, `bot/` | 入口；连接、播放主循环（`player.py`）、频道跟随（`channels.py`）、缓存与清理 |
-| `media/` | 各类音源（URL、B 站、Spotify、直播、电台、本地文件）、播放队列、SponsorBlock |
-| `commands/` | 聊天命令 |
-| `interface.py`, `web_*.py` | Flask：旧接口与 `/api/*`（状态、队列、搜索、上传、缓存、频道、用户与歌单） |
-| `playlist_import.py` | 歌单导入与 YouTube 匹配 |
-| `webui/` | 新版 Web 前端 |
-| `lang/` | 聊天消息与帮助文本翻译（`zh_CN`、`en_US` 等） |
-| `deploy/` | 部署文档、systemd 单元 |
-| `tests/` | 单元测试 |
+| `mumbleBot.py`, `bot/` | Entry point; connection handling, playback loop (`player.py`), channel following (`channels.py`), cache and cleanup |
+| `media/` | Audio sources (URL, Bilibili, Spotify, live, radio, local files), the play queue, SponsorBlock |
+| `commands/` | Chat command handlers |
+| `interface.py`, `web_*.py` | Flask application: the legacy endpoints and the `/api/*` endpoints |
+| `playlist_import.py` | Playlist import and YouTube matching |
+| `webui/` | Web interface source and build output |
+| `lang/` | Translations for chat messages and help text |
+| `deploy/` | Deployment guides and systemd units |
+| `tests/` | Unit tests |
 
-</details>
+## Acknowledgements
 
-## 致谢与许可
+This project is based on [botamusique](https://github.com/azlux/botamusique) by Azlux and its contributors, including @TerryGeng and @mertkutay. It also builds on [pymumble](https://codeberg.org/pymumble/pymumble), [yt-dlp], [spotDL], [SponsorBlock], [BilibiliSponsorBlock] and [OpenCC](https://github.com/BYVoid/OpenCC).
 
-基于 [azlux/botamusique](https://github.com/azlux/botamusique)（作者 Azlux，协作者 @TerryGeng、@mertkutay），使用 MIT 许可证，见 [`LICENSE`](LICENSE)。用到的主要项目：[pymumble](https://codeberg.org/pymumble/pymumble)、[yt-dlp](https://github.com/yt-dlp/yt-dlp)、[spotDL](https://github.com/spotDL/spotify-downloader)、[SponsorBlock](https://sponsor.ajay.app/)、[BilibiliSponsorBlock](https://bsbsb.top/)、[OpenCC](https://github.com/BYVoid/OpenCC)。
+## License
+
+Released under the [MIT License](LICENSE).
+
+[yt-dlp]: https://github.com/yt-dlp/yt-dlp
+[spotDL]: https://github.com/spotDL/spotify-downloader
+[SponsorBlock]: https://sponsor.ajay.app/
+[BilibiliSponsorBlock]: https://bsbsb.top/
