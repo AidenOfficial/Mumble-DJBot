@@ -1,292 +1,196 @@
-# Important Announcement
-
-Hello everyone,
-
-First, let's look at the problems:
-1. I don't use mumble anymore, working on a bot you don't use produces a leak of testing and motivation.
-2. I don't code like before, my hobbies have changed, I maintain stuff I still use, but no real coding anymore.
-3. Botamusique is monolitique
-
-I've been trying to make a POC to change the monolitique part, to have a fully modulable bot, with asyncio and and feature/backend as plugins. But asyncio was blocking for me, especially to make the bot with fastapi, discord api / pymumble. It's 2 async loop and I don't have the knowledge to make it work.
-To be transparent, botamusique was the biggest project I've done, one of the funniest. Thanks @TerryGeng for joining the adventure.
-
-I don't think I will be looking for a maintainer, the monolithic part of this project is not something that needs to be maintained.
-
-**This projet will be archived.**
-
-BUT If someone want to rewrite a bot, I'm ready to help with the projet : what to do, Errors to avoid, Design/architecture help (but no code). I think **_8 years_** on this projet (have start with [this small projet](https://github.com/azlux/MumbleRadioPlayer/commit/56ca276c5519fcb0e1af043beb043202e65c2cca)) can help someone.
-
-It was really funny, thank all, for your support !
-
-See you in space cowboy.
-
--- Azlux
-
------
-
 <div align="center">
-<img src="static/image/logo.png" alt="botamusique" width="200px" />
-<h1>botamusique</h1>
+<img src="static/image/logo.png" alt="Mumble-DJBot" width="160px" />
+<h1>Mumble-DJBot</h1>
+<p>给 <a href="https://www.mumble.info/">Mumble</a> 频道放歌的机器人：聊天命令点歌，网页上管队列、歌单和缓存。</p>
 </div>
 
-Botamusique is a [Mumble](https://www.mumble.info/) music bot.
-Predicted functionalities will be those people would expect from any classic music player.
+本项目 fork 自 [azlux/botamusique](https://github.com/azlux/botamusique)（上游已归档）。在它的基础上重写了 Web 界面，加了个人歌单、歌单导入、边下边播、频道跟随等功能，并按 Docker + Cloudflare Tunnel 的部署方式整理过。
 
-[![Build Status](https://ci.azlux.fr/api/badges/azlux/botamusique/status.svg)](https://ci.azlux.fr/azlux/botamusique)
+## 功能
 
-## Features
+**音源**
+- YouTube、Bilibili（BV 号 / 链接）、SoundCloud 等 yt-dlp 支持的站点，以及它们的播放列表。
+- Spotify 歌曲 / 歌单 / 关键词（经 spotdl 到 YouTube 取音频）。
+- 直播（`!live`）、网络电台（含 radio-browser.info 搜索）、本地曲库文件。
 
-1. **Support multiple music sources:**
-    - Music files in local folders (which can be uploaded through the web interface).
-    - Youtube/Soundcloud URLs and playlists (everything supported by youtube-dl).
-    - Radio stations from URL and http://www.radio-browser.info API.
-2. **Modern and powerful web remote control interface.** Powered by Flask. Which supports:
-    - Playlist management.
-    - Music library management, including uploading, browsing all files and edit tags, etc.
-3. **Powerful command system.** Commands and words the bot says are fully customizable. Support partial-match for commands.
-4. **Ducking.** The bot would automatically lower its volume if people are talking.
-5. **Stereo sound.** After Mumble 1.4.0, stereo output support has been added. Our bot is designed to work nicely with it naturally.
-6. **Multilingual support.** A list of supported languages can be found below.
+**播放**
+- 长视频边下边播：攒够约 30 秒音频就开播，剩下的在后台继续下载。B 站 50 分钟视频从点歌到出声约 6 秒。
+- 自动跳过非音乐片段（SponsorBlock / BilibiliSponsorBlock 社区标注的片头说话、赞助口播等）。
+- 队列预下载、音量标准化（loudnorm）、有人说话时自动压低音量（ducking）、立体声。
+- 播放模式：顺序、循环、单曲循环、随机、自动（从曲库随机挑）。
 
+**频道**
+- 设置页能看到服务器的频道树，可以设默认频道，或让 bot 立刻移过去。
+- 跟随模式：频道没人时跟着最后离开的人走，或始终跟着指定的人。
+- 频道里连续 5 分钟没人自动暂停，有人回来自动继续。
 
-## Screenshots
+**Web 界面**（`/`，旧界面保留在 `/legacy`）
+- Now Playing（封面、进度、等待开播的阶段和预计时间）、队列拖拽排序、YouTube + B 站统一搜索。
+- 曲库浏览和分片上传：单文件默认上限 4 GB，断网自动续传，视频只保留音轨。
+- 缓存管理：查看每首的占用和播放次数，可以固定常听的歌或存进曲库。超过上限时按"最久没用"淘汰，常听的歌最后才淘汰。
+- 播放统计：最常放、谁点得最多、什么时段最热闹、最常被跳过。
 
-![botamusique in Mumble channel](https://user-images.githubusercontent.com/2306637/75210917-68fbf680-57bd-11ea-9cf8-c0871edff13f.jpg)
+**个人歌单**
+- 用 Cloudflare Access 登录的邮箱识别身份，可以给自己设别名。
+- 每人有自己的歌单，可以"立即播放 / 随机 / 追加到队列"。
+- 导入 YouTube 播放列表、网易云音乐 / QQ 音乐歌单、Spotify 歌单 / 专辑。网易云、QQ 音乐和 Spotify 的歌会自动到 YouTube 匹配音源，简繁体标题都能匹配。
+- 网页上生成绑定码后，在 Mumble 里发 `!bind` 绑定账号，之后可以在聊天里用 `!mylist`、`!fav` 操作自己的歌单。
 
-![botamusique web interface](https://user-images.githubusercontent.com/2306637/77822763-b4911f80-7130-11ea-9bc5-83c36c995ab9.png)
+**稳定性**
+- 看门狗：主循环卡住超过 120 秒自动退出，由 Docker 拉起。另有心跳文件供健康检查使用。
+- 下载失败自动续传重试，单首歌出错不影响整个进程。
 
------
-## Quick Start Guide
-1. [Installation](#installation)
-1. [Configuration](#configuration)
-1. [Run the bot](#run-the-bot)
-1. [Operate the bot](#operate-the-bot)
-1. [Update](#update)
-1. [Known issues](#known-issues)
-1. [Contributors](#contributors)
+## 快速开始（Docker）
 
-## Installation
+推荐用 Docker 部署，所有依赖（Python 3.12、ffmpeg、opus、yt-dlp、spotdl、Deno）都在镜像里。bot 是主动连出到 Mumble 服务器的客户端，不需要映射端口。
 
-### Dependencies
-1. Install python. We require a python version of 3.6 or higher.
-1. Install [Opus Codec](https://www.opus-codec.org/) (which should be already installed if you installed Mumble or Murmur, or you may try to install `opus-tools` with your package manager).
-1. Install ffmpeg. If ffmpeg isn't in your package manager, you may need to find another source. I personally use [this repository](http://repozytorium.mati75.eu/) on my raspberry.
-
-
-### Docker
-See https://github.com/azlux/botamusique/wiki/Docker-install
-
-Both stable and nightly (developing) builds are available!
-
-### Manual install
-
-**Stable release (recommended)**
-
-This is current stable version, with auto-update support. To install the stable release, run these lines in your terminal:
-```
-curl -Lo botamusique.tar.gz http://packages.azlux.fr/botamusique/sources-stable.tar.gz
-tar -xzf botamusique.tar.gz
-cd botamusique
-python3 -m venv venv
-venv/bin/pip install wheel
-venv/bin/pip install -r requirements.txt
+```bash
+git clone https://github.com/AidenOfficial/Mumble-DJBot.git
+cd Mumble-DJBot
+cp configuration.example.ini configuration.ini   # 必须在 up 之前建好，否则 Docker 会把它挂成目录
+nano configuration.ini
 ```
 
-**Nightly build (developing version)**
-<details>
-  <summary>Click to expand!</summary>
+最小配置。没写的项从 `configuration.default.ini` 取默认值，**不要改那个文件**：
 
-This build reflects any newest change in the master branch, with auto-update support baked in. This version follow all commits into the master branch.
-```
-curl -Lo botamusique.tar.gz http://packages.azlux.fr/botamusique/sources-testing.tar.gz
-tar -xzf botamusique.tar.gz
-cd botamusique
-python3 -m venv venv
-venv/bin/pip install wheel
-venv/bin/pip install -r requirements.txt
-```
-</details>
-
-**Build from source code**
-<details>
-  <summary>Click to expand!</summary>
-
-You can checkout the master branch of our repo and compile everything by yourself.
-We will test new features in the master branch, maybe sometimes post some hotfixes.
-Please be noted that the builtin auto-update support doesn't track this version.
-If you have no idea what these descriptions mean to you, we recommend you install the stable version above.
-```
-git clone https://github.com/azlux/botamusique.git
-cd botamusique
-python3 -m venv venv
-venv/bin/pip install wheel
-venv/bin/pip install -r requirements.txt
-(cd web && npm install && npm run build)
-venv/bin/python3 ./scripts/translate_templates.py --lang-dir lang/ --template-dir web/templates/
-```
-</details>
-
-## Configuration
-Please copy `configuration.example.ini` into `configuration.ini`, follow the instructions in that file and uncomment options you would like to modify. Not all sections are needed. You may just keep the options that matter to you. For example, if you only would like to set `host`, all you need you is keep 
-```
+```ini
 [server]
-host=xxxxxx
-```
-in your `configuration.ini`.
-
-Please DO NOT MODIFY `configuration.default.ini`, since if the bot realizes one option is undefined in `configuration.ini`, it will look into `configuration.default.ini` for the default value of that option. This file will be constantly overridden in each update.
-
-We list some basic settings for you to quickly get things working.
-
-### Basic settings
-1. Usually, the first thing is to set the Murmur server you'd like the bot to connect to. You may also specify which channel the bot stays, and tokens used by the bot.
-```
-[server]
-host = 127.0.0.1
+host = mumble.example.com
 port = 64738
-```
+;password = 服务器密码
+channel = 音乐频道        ; 多级频道写成 Games/Squad
 
-2. You need to specify a folder that stores your music files. The bot will look for music and upload files into that folder. You also need to specify a temporary folder to store music file downloads from URLs.
-```
 [bot]
-music_folder = music_folder/
-tmp_folder = /tmp/
-```
+username = MusicBot
+admin = 你的Mumble用户名  ; 多个用分号隔开
+language = zh_CN
 
-3. **Web interface is disabled by default** for performance and security reasons. It is extremely powerful, so we encourage you to have a try. To enable it, set
-```
 [webinterface]
 enabled = True
+listening_addr = 0.0.0.0  ; 容器内要监听所有地址，由 compose 网络隔离
+
+; 只有 !spotify 命令需要。导入 100 首以内的 Spotify 歌单不需要
+[spotify]
+client_id =
+client_secret =
 ```
 
-Default binding address is
-```
-listening_addr = 127.0.0.1
-listening_port = 8181
-```
+启动：
 
-You can access the web interface through http://127.0.0.1:8181 if you keep it unchanged.
-
-Note: Listening to address `127.0.0.1` will only accept requests from localhost. _If you would like to connect from the public internet, you need to set it to `0.0.0.0`, and set up username and password to impose access control._ In addition, if the bot is behind a router, you should also properly set forwarding rules in you NAT configuration to forward requests to the bot.
-
-4. The default language is English, but you can change it in `[bot]` section:
-```
-[bot]
-language=en_US
-```
-
-Available translations can be found inside `lang/` folder. Currently, options are
-
- - `en_US`, English
- - `es_ES`, Spanish
- - `fr_FR`, French
- - `it_IT`, Italian
- - `ja_JP`, Japanese
- - `zh_CN`, Chinese
-
-5. Generate a certificate (Optional, but recommended)
-
-By default, murmur server uses certificates to identify users. Without a valid certificate, you wouldn't able to register the bot into your Murmur server. Some server even refused users without a certificate. Therefore, it is recommended to generate a certificate for the bot. If you have a certificate (for say, `botmusique.pem` in the folder of the bot), you can specify its location in
-```
-[server]
-certificate=botamusique.pem
-```
-
-If you don't have a certificate, you may generate one by:
-`openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout botamusique.pem -out botamusique.pem -subj "/CN=botamusique"`
-
-
-### Sections explained
-- `server`: configuration about the server. Will be overridden by the `./mumbleBot.py` parameters.
-- `bot`: basic configuration of the bot, eg. name, comment, folder, default volume, etc.
-- `webinterface`: basic configuration about the web interface.
-- `commands`: you can customize the command you want for each action (eg. put `help = helpme` , the bot will respond to `!helpme`)
-- `radio`: a list of default radio (eg. play a jazz radio with the command `!radio jazz`)
-- `debug`: option to activate ffmpeg or pymumble debug output.
-
-
-## Run the bot
-If you have set up everything in your `configuration.ini`, you can
-`venv/bin/python mumbleBot.py --config configuration.ini`
-
-Or you can
-`venv/bin/python mumbleBot.py -s HOST -u BOTNAME -P PASSWORD -p PORT -c CHANNEL -C /path/to/botamusique.pem`
-
-If you want information about auto-starting and auto-restarting of the bot, you can check out the wiki page [Run botamusique as a daemon In the background](https://github.com/azlux/botamusique/wiki/Run-botamusique-as-a-daemon-In-the-background).
-
-**For the detailed manual of using botamusique, please see the [wiki](https://github.com/azlux/botamusique/wiki).**
-
-## Operate the bot
-
-You can control the bot by both commands sent by text message and the web interface.
-
-By default, all commands start with `!`. You can type `!help` in the text message to see the full list of commands supported, or see the examples on the [wiki page](https://github.com/azlux/botamusique/wiki/Command-Help-and-Examples).
-
-The web interface can be used if you'd like an intuitive way of interacting with the bot. Through it is fairly straightforward, a walk-through can be found on the [wiki page](https://github.com/azlux/botamusique/wiki/Web-interface-walk-through).
-
-## Update
-
-If you enable `auto_check_update`, the bot will check for updates every time it starts.
-If you are using the recommended install, you can send `!update` to the bot (command by default).
-
-If you are using git, you need to update manually:
-```
-git pull --all
-git submodule update
-venv/bin/pip install --upgrade -r requirements.txt
-```
-
-
-## Known issues
-
-1. During installation, you may encounter the following error:
-```
-ImportError: libtiff.so.5: cannot open shared object file: No such file or directory
-```
-You need to install a missing library: `apt install libtiff5`
-
-2. In the beginning, you may encounter the following error even if you have installed all requirements:
-```
-Exception: Could not find opus library. Make sure it is installed.
-```
-You need to install the opus codec (not embedded in all system): `apt install libopus0`
-
-3. MacOS Users may encounter the following error:
-```
-ImportError: failed to find libmagic.  Check your installation
-```
-This is caused by missing `libmagic` binaries and can be solved by
 ```bash
-brew install libmagic
-
+docker compose build
+docker compose up -d
+docker compose logs -f
 ```
-One may also install `python-magic-bin` instead of `python-magic`.
 
-5. If you have a large amount of music files (>1000), it may take some time for the bot to boot, since
-it will build up the cache for the music library on booting. You may want to disable this auto-scanning by
-setting ``refresh_cache_on_startup=False`` in `[bot]` section and control the scanning manually by
-``!rescan`` command and the *Rescan Files* button on the web interface.
+进同一个频道发 `!help` 就能看到全部命令。
 
-6. Alpine Linux requires some extra dependencies during the installation (in order to compile Pillow):
+容器每次启动都会把 yt-dlp / spotdl 升级到最新（`BAM_UPDATE_ON_START=1`）。B 站和 YouTube 经常改版，建议每天定时 `docker restart mumble-music` 一次。
+
+完整步骤（绿联 NAS、cookies、日常运维）见 [`deploy/DOCKER.md`](deploy/DOCKER.md)。不用 Docker、直接装在 Ubuntu 上的步骤见 [`deploy/DEPLOY.md`](deploy/DEPLOY.md)。
+
+## Web 界面与公网访问
+
+推荐的公网发布方式是 Cloudflare Tunnel + Access：登录鉴权交给 Cloudflare，8181 端口不暴露。
+
+```bash
+echo 'CLOUDFLARE_TUNNEL_TOKEN=eyJh...' > .env
+docker compose --profile tunnel up -d
 ```
-python3-dev musl-lib libmagic jpeg-dev zlib-dev gcc
+
+Cloudflare 控制台里 Tunnel 的回源地址填 `http://botamusique:8181`，再建一个 Access 应用按邮箱放行。详细步骤见 [`deploy/WEBUI.md`](deploy/WEBUI.md)。
+
+> [!IMPORTANT]
+> 默认 `auth_method = none`，应用本身不做登录，全靠 Cloudflare Access 挡在前面：
+> - **不要把 8181 端口直接暴露到公网或不可信的局域网。**
+> - 建议在 `[webinterface]` 里填上 `access_team_domain` 和 `access_aud`，开启 Access JWT 校验。开启后，绕过 Tunnel 直连的请求无法伪造登录身份。
+> - 改用 `auth_method = token` 时，一定要把 `flask_secret` 换成随机字符串。
+
+## 聊天命令
+
+命令以 `!` 开头（全角 `！` 也可以），支持前缀匹配，比如 `!sk` 就是 `!skip`。在 `[commands]` 里可以改名。下面是常用的，完整列表发 `!help`。
+
+| 命令 | 作用 |
+|---|---|
+| `!url <链接>` / `!bili <BV号或链接>` | 点一首 YouTube / B 站视频的音频 |
+| `!yplay <关键词>` / `!ysearch <关键词>` | 搜 YouTube 并直接加第一条 / 列出结果 |
+| `!spotify <链接或关键词>` | Spotify 歌曲、歌单或搜索 |
+| `!playlist <链接>` | 加入整个播放列表 |
+| `!live <链接>` / `!radio <名字或链接>` | 直播 / 网络电台 |
+| `!file <路径>` / `!filematch <关键词>` | 从本地曲库添加 |
+| `!play [序号]` / `!pause` / `!skip` / `!stop` | 播放控制 |
+| `!queue` / `!np` / `!rm <序号>` | 看队列 / 当前曲 / 删除 |
+| `!mode <1-5>` | 顺序 / 循环 / 随机 / 自动 / 单曲循环 |
+| `!repeat [次数]` | 把当前曲再排几遍（最多 20） |
+| `!volume <0-100>` / `!duck on\|off` | 音量 / 说话时压低音量 |
+| `!joinme` / `!oust` | 叫 bot 来自己的频道 / 停止并回默认频道 |
+| `!bind <绑定码>` / `!mylist [歌单] [shuffle]` / `!fav [歌单]` | 个人歌单（先在网页上生成绑定码） |
+| `!web` | 获取网页地址 |
+
+管理员（`[bot] admin` 里的用户）还可以用 `!kill`、`!update`、`!urlban`、`!userban`、`!maxvolume`、`!webuseradd` 等命令。
+
+> [!NOTE]
+> 管理员目前按 Mumble 显示名判定。请把管理员账号在 Mumble 服务器上注册，否则别人可以在你离线时用同名登录冒充你。
+
+## 常用配置
+
+所有选项及说明见 [`configuration.example.ini`](configuration.example.ini)。几个常改的：
+
+| 选项 | 默认 | 说明 |
+|---|---|---|
+| `[bot] stream_while_downloading` | `True` | 长视频边下边播（时长 ≥ `stream_min_duration` 秒的才启用） |
+| `[bot] tmp_folder_max_size` | `4096` | 下载缓存上限（MB），超出按最久没用淘汰 |
+| `[bot] max_track_duration` | `0` | 单曲时长上限（分钟），0 = 不限 |
+| `[bot] sponsorblock` | `True` | 跳过非音乐片段；分类见 `sponsorblock_categories` |
+| `[bot] when_nobody_in_channel` | `nothing` | 频道没人时立即 `pause` / `stop`；一般保持 `nothing`，用设置页里的"5 分钟后自动暂停" |
+| `[bot] playback_mode` | `one-shot` | 启动时的播放模式 |
+| `[webinterface] max_upload_file_size` | `4G` | 网页上传单文件上限 |
+| `[youtube_dl] cookie_file` | 空 | B 站大会员 / YouTube 登录 cookies（Netscape 格式） |
+
+默认频道、跟随模式、自动暂停在网页设置页里改，不用写进 ini。
+
+## 开发
+
+运行测试（不需要 Mumble 服务器，也不需要装 pymumble）：
+
+```bash
+python3.12 -m venv venv
+venv/bin/pip install -r requirements.txt pytest
+venv/bin/python -m pytest tests
 ```
-For more information, see [#122](https://github.com/azlux/botamusique/issues/122).
 
-## _I need help!_
+需要 Python 3.12。pymumble 2.x 要求 ≥ 3.12，而 3.13 移除了 `audioop`，要用 3.13 就得另装 `audioop-lts`。
 
-If you ran into some problems in using the bot, or discovered bugs and want to talk to us, you may
+Web 前端在 `webui/`，技术栈是 Vue 3 + TypeScript + Vite + Tailwind 4：
 
- - Start a new issue,
- - Ask in the Matrix channel of Mumble [#mumble:matrix.org](https://matrix.to/#/#mumble:matrix.org) (we are usually there to help).
+```bash
+cd webui
+npm ci
+npm run dev     # 开发服务器，/api 代理到 127.0.0.1:8181
+npm run build   # 产物在 webui/dist，随仓库提交
+```
 
-## Contributors
-If you want to help us develop, you're welcome to fork and submit pull requests (fixes and new features).
-We are looking for people helping us translating the bot. If you'd like to add a new language or fix errors in existed translations,
-feel free to catch us in the IRC channel #mumble, or just email us!
+Docker 构建时也会重新 build 一次前端。改完前端请把 `webui/dist` 一起提交，这样不用 Docker 的部署也能直接用。
 
-The following people joined as collaborators for a faster development, big thanks to them:
-- @TerryGeng
-- @mertkutay
+不连 Mumble、只验证运行环境和 B 站 / Spotify 下载链路，可以跑 `scripts/smoke_test.py`，用法见 [`deploy/VERIFY.md`](deploy/VERIFY.md)。
 
-Feel free to ask me if you want to help actively without using pull requests.
+<details>
+<summary>代码结构</summary>
+
+| 路径 | 内容 |
+|---|---|
+| `mumbleBot.py`, `bot/` | 入口；连接、播放主循环（`player.py`）、频道跟随（`channels.py`）、缓存与清理 |
+| `media/` | 各类音源（URL、B 站、Spotify、直播、电台、本地文件）、播放队列、SponsorBlock |
+| `commands/` | 聊天命令 |
+| `interface.py`, `web_*.py` | Flask：旧接口与 `/api/*`（状态、队列、搜索、上传、缓存、频道、用户与歌单） |
+| `playlist_import.py` | 歌单导入与 YouTube 匹配 |
+| `webui/` | 新版 Web 前端 |
+| `lang/` | 聊天消息与帮助文本翻译（`zh_CN`、`en_US` 等） |
+| `deploy/` | 部署文档、systemd 单元 |
+| `tests/` | 单元测试 |
+
+</details>
+
+## 致谢与许可
+
+基于 [azlux/botamusique](https://github.com/azlux/botamusique)（作者 Azlux，协作者 @TerryGeng、@mertkutay），使用 MIT 许可证，见 [`LICENSE`](LICENSE)。用到的主要项目：[pymumble](https://codeberg.org/pymumble/pymumble)、[yt-dlp](https://github.com/yt-dlp/yt-dlp)、[spotDL](https://github.com/spotDL/spotify-downloader)、[SponsorBlock](https://sponsor.ajay.app/)、[BilibiliSponsorBlock](https://bsbsb.top/)、[OpenCC](https://github.com/BYVoid/OpenCC)。
