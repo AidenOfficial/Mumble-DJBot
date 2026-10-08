@@ -177,12 +177,20 @@ class PlayerMixin:
             # 而不是让主循环永远阻塞在 stdout.read 上,最后被看门狗判死重启。
             command += ['-reconnect', '1', '-reconnect_streamed', '1',
                         '-reconnect_delay_max', '10', '-rw_timeout', '30000000']
-        if start_from > 0:
+        seek = start_from
+        try:
+            if getattr(music_wrapper.item(), 'type', '') in ('radio', 'livestream'):
+                # 直播/电台不能 seek:暂停后恢复时 playhead 可能已经很大,旧的输出端
+                # -ss 会实时解码这么多秒的直播音频,主循环同样被卡到看门狗超时
+                seek = 0
+        except Exception:
+            pass
+        if seek > 0:
             # 输入端 seek(-ss 放在 -i 之前):由解复用器直接跳转。
             # 以前 -ss 放在 -i 之后,ffmpeg 要把前面的音频全部解码 + loudnorm
             # 再丢掉;长视频恢复播放/拖动进度到 2 小时处要卡几十秒到几分钟,
             # 主循环阻塞超过 watchdog_timeout 就被判定卡死,整个进程退出。
-            command += ['-ss', f"{start_from:f}"]
+            command += ['-ss', f"{seek:f}"]
         command += ['-i', uri,
                     # Decode audio only. Without this, ffmpeg may try to handle a
                     # video / cover-art stream from a container (mp4/mkv, or a

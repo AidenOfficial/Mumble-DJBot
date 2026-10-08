@@ -108,6 +108,15 @@ class FfmpegCommandTest(Base):
         self.assertIn('-rw_timeout', cmd)
         self.assertLess(cmd.index('-reconnect'), cmd.index('-i'))
 
+    def test_live_sources_never_seek(self):
+        player = Player()
+        wrapper = FakeWrapper('https://radio.example/stream')
+        wrapper.item = lambda: type('Radio', (), {'type': 'radio'})()
+        with mock.patch('bot.player.sp.Popen') as popen, \
+                mock.patch('bot.player.threading.Thread'):
+            player.launch_music(wrapper, 900)
+        self.assertNotIn('-ss', popen.call_args[0][0])
+
     def test_local_file_has_no_network_options(self):
         cmd = self.launch('/music/a.opus', 0)
         self.assertNotIn('-reconnect', cmd)
