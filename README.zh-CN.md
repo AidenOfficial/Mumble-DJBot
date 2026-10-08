@@ -14,7 +14,7 @@
 
 ---
 
-Mumble-DJBot 加入 Mumble 频道后，可播放来自 YouTube、Bilibili、Spotify、直播、网络电台及本地曲库的音频。用户可通过聊天命令或浏览器中的控制台点歌；控制台同时提供播放队列管理、个人歌单、缓存管理与播放统计。
+Mumble-DJBot 可播放来自 YouTube、Bilibili、Spotify、直播、网络电台及本地曲库的音频。用户可通过聊天命令或浏览器中控制；控制台同时提供播放队列管理、个人歌单、缓存管理与播放统计。
 
 本项目 fork 自 [azlux/botamusique](https://github.com/azlux/botamusique)（上游已归档）。在此基础上重写了 Web 界面，新增个人歌单、歌单导入、边下边播与频道跟随等功能，并以 Docker 配合 Cloudflare Tunnel / Cloudflare Access 作为推荐的部署方式。
 
