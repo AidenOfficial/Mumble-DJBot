@@ -9,6 +9,7 @@ from PIL import Image
 import yt_dlp as youtube_dl
 import glob
 from io import BytesIO
+from urllib.parse import urlparse
 import base64
 
 import util
@@ -334,8 +335,14 @@ class URLItem(BaseItem):
             for i in range(attempts):
                 self.log.info("bot: download attempts %d / %d" % (i + 1, attempts))
                 try:
+                    client = self._youtube_fallback_client(i, base_path)
                     info = self._fresh_info() if i == 0 else None
-                    if info is not None:
+                    if client:
+                        self.log.info("url: retrying with YouTube player client %s", client)
+                        alt_opts = dict(ydl_opts, extractor_args={'youtube': {'player_client': [client]}})
+                        with youtube_dl.YoutubeDL(alt_opts) as alt:
+                            info = alt.extract_info(self.url)
+                    elif info is not None:
                         # 复用校验时读到的信息直接下载(等同 yt-dlp --load-info-json),
                         # 省掉第二次读取:实测 B 站从 4.7 秒缩到 0.7 秒开始收到数据
                         for c in self._info_cookies:
@@ -381,6 +388,27 @@ class URLItem(BaseItem):
                 self._set_stage('failed')
                 self.downloading = False
                 raise PreparationFailedError(tr('unable_download', item=self.format_title()))
+
+    # 默认客户端拿到的音频直链对个别视频固定 403(实测 visionos 客户端,换 web_embedded 就好);
+    # web/mweb 需要 PO token,没配时一般拿不到格式,所以排在后面
+    YOUTUBE_FALLBACK_CLIENTS = ('web_embedded', 'tv', 'mweb')
+
+    def _is_youtube(self):
+        host = (urlparse(self.url).hostname or '').lower()
+        return host == 'youtu.be' or host == 'youtube.com' or host.endswith(('.youtube.com', '.youtube-nocookie.com'))
+
+    def _youtube_fallback_client(self, attempt, base_path):
+        """第 2、4、6… 次尝试换备用客户端,其余仍用默认(偶发 403 重试默认客户端就能好)。
+        已经下了一部分就不换:不同客户端可能选到不同的流,续传会把文件拼坏。"""
+        if attempt % 2 == 0 or not self._is_youtube():
+            return None
+        try:
+            if os.path.getsize(base_path) > 0:
+                return None
+        except OSError:
+            pass
+        clients = self.YOUTUBE_FALLBACK_CLIENTS
+        return clients[(attempt // 2) % len(clients)]
 
     def _normalize_download_path(self, info, base_path):
         """bot 约定缓存文件就叫 <id>(不带扩展名)。万一 yt-dlp 实际写成了别的名字

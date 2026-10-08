@@ -49,6 +49,7 @@ class FakeYDL:
     script = []
     calls = []
     cookies_seen = []
+    clients_seen = []
 
     def __init__(self, opts):
         self.opts = opts
@@ -63,6 +64,8 @@ class FakeYDL:
 
     def _run(self, kind, arg):
         FakeYDL.calls.append(kind)
+        FakeYDL.clients_seen.append(
+            (self.opts.get('extractor_args') or {}).get('youtube', {}).get('player_client', [None])[0])
         action = FakeYDL.script.pop(0)
         path = self.opts['outtmpl']
         if action == 'partial':
@@ -89,6 +92,7 @@ class FakeYDL:
 class DownloadTest(Base):
     def run_download(self, item, script):
         FakeYDL.script, FakeYDL.calls, FakeYDL.cookies_seen = list(script), [], []
+        FakeYDL.clients_seen = []
         with mock.patch('media.url.youtube_dl.YoutubeDL', FakeYDL), mock.patch('media.url.time.sleep'):
             return item._download()
 
@@ -124,6 +128,42 @@ class DownloadTest(Base):
             self.run_download(item, ['partial'] * 3)
         self.assertFalse(os.path.exists(item.path))
         self.assertEqual(item.stage, 'failed')
+
+    def youtube_item(self):
+        import media.url
+        item = media.url.URLItem('https://www.youtube.com/watch?v=WpCPBxn_lQI')
+        item.title, item.duration, item.ready = 'Probably Up', 200, 'validated'
+        return item
+
+    def test_youtube_403_retries_with_fallback_client(self):
+        # 个别视频默认客户端的直链固定 403:第二次尝试换 web_embedded
+        item = self.youtube_item()
+        self.assertTrue(self.run_download(item, ['HTTP Error 403: Forbidden', 'ok']))
+        self.assertEqual(FakeYDL.clients_seen, [None, 'web_embedded'])
+
+    def test_youtube_fallback_alternates_with_default(self):
+        item = self.youtube_item()
+        var.config.set('bot', 'download_attempts', '4')
+        self.assertTrue(self.run_download(item, ['403', '403', '403', 'ok']))
+        self.assertEqual(FakeYDL.clients_seen, [None, 'web_embedded', None, 'tv'])
+
+    def test_no_client_switch_once_partial_data_exists(self):
+        # 换客户端可能换了流,续传会拼坏文件
+        item = self.youtube_item()
+        self.assertTrue(self.run_download(item, ['partial', 'ok']))
+        self.assertEqual(FakeYDL.clients_seen, [None, None])
+
+    def test_non_youtube_never_switches_client(self):
+        item = self.item()  # bilibili
+        self.assertTrue(self.run_download(item, ['403', 'ok']))
+        self.assertEqual(FakeYDL.clients_seen, [None, None])
+
+    def test_youtube_host_detection(self):
+        import media.url
+        for url, expected in [('https://youtu.be/x', True), ('https://music.youtube.com/watch?v=x', True),
+                              ('https://m.youtube.com/watch?v=x', True), ('https://www.bilibili.com/video/BV1', False),
+                              ('https://notyoutube.com/x', False)]:
+            self.assertEqual(media.url.URLItem(url)._is_youtube(), expected, url)
 
     def test_file_written_with_extension_is_renamed(self):
         item = self.item()

@@ -226,6 +226,28 @@ class PlaylistTest(Base):
         self.assertIn('clear', var.bot.calls)
         self.assertFalse(var.bot.is_pause)
 
+    def test_play_replace_keeps_items_cached(self):
+        # 真实的 bot.clear() 会 var.cache.free_all();重建好的条目必须在清空后仍在缓存里,
+        # 否则队列全是悬空引用,播放循环 ItemNotCachedError 一首首跳过
+        pid = self.create()
+        h = self.as_user()
+        for n in range(2):
+            self.client.post(f'/api/playlists/{pid}/items', headers=h,
+                             json={'source': 'url', 'url': f'https://e.com/{n}'})
+        var.bot.clear = lambda: (var.bot.calls.append('clear'), var.playlist.clear(),
+                                 var.cache.clear())
+
+        def fake_wrapper(entry, user):
+            item = FakeItem(entry['item_id'])
+            var.cache[item.id] = item
+            return FakeWrapper(item)
+        with mock.patch('web_users.wrapper_from_entry', side_effect=fake_wrapper):
+            rv = self.client.post(f'/api/playlists/{pid}/play', headers=h, json={'mode': 'replace'})
+        self.assertEqual(rv.get_json()['queued'], 2)
+        self.assertEqual(len(var.playlist), 2)
+        for wrapper in var.playlist:
+            self.assertIn(wrapper.id, var.cache)
+
 
 class EntryRebuildTest(unittest.TestCase):
     def test_url_from_playlist_is_stored_as_plain_url(self):

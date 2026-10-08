@@ -541,7 +541,13 @@ def _enqueue(wrappers, mode):
     if not wrappers:
         return
     if mode == 'replace':
+        # clear() 会 var.cache.free_all(),把刚为这些 wrapper 注册的条目也清掉,
+        # 队列里就全是悬空引用(ItemNotCachedError,一首首被跳过)。
+        # 先取出条目,清空后再放回缓存。
+        items = [w.item() for w in wrappers]
         var.bot.clear()
+        for item in items:
+            var.cache[item.id] = item
         var.playlist.extend(wrappers)
         # 不走 resume():current_index 为 -1 时它会先 next() 一次,
         # 主循环再 next() 一次,第一首就被跳过了
