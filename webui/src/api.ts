@@ -11,6 +11,24 @@ export interface CurrentItem {
   has_thumbnail: boolean
   /** SponsorBlock 会跳过的片段 [开始, 结束](秒),只有当前曲有 */
   skip_segments?: [number, number][]
+  /** 后台下载中(预下载 / 边下边播)才有 */
+  download?: { progress: number; speed: number; eta: number | null; stage: string }
+}
+
+/** 当前曲还没出声时的准备进度 */
+export interface PrepStatus {
+  stage: 'pending' | 'fetching_info' | 'starting' | 'downloading' | 'launching' | 'ready' | 'failed'
+  elapsed: number
+  stage_elapsed: number
+  eta: number | null
+  eta_estimated: boolean
+  speed: number
+  downloaded: number
+  total: number
+  progress: number
+  streaming: boolean
+  buffered_secs: number
+  target_secs: number
 }
 
 export interface QueueItem extends CurrentItem {
@@ -29,6 +47,7 @@ export interface BotStatus {
   current_index: number
   server_time: number
   current: CurrentItem | null
+  prep: PrepStatus | null
 }
 
 export interface QueueResponse {

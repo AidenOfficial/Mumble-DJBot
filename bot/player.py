@@ -382,6 +382,7 @@ class PlayerMixin:
         return th
 
     def start_download(self, item):
+        self._wait_started = time.time()  # "已经等了多久"从这里算
         if not item.is_ready():
             self.log.info("bot: current music isn't ready, start downloading.")
             self.async_download(item)
@@ -442,12 +443,73 @@ class PlayerMixin:
         except Exception:
             self.log.debug("bot: download progress reporter failed", exc_info=True)
 
+    # =======================
+    #   准备进度(Web 可视化 / 聊天播报)
+    # =======================
+
+    def is_waiting_for(self, item_id):
+        """bot 正在等这首歌准备好(还没出声)。"""
+        if self.is_pause or not self.wait_for_ready or len(var.playlist) == 0:
+            return False
+        current = var.playlist.current_item()
+        return bool(current) and current.id == item_id
+
+    def prep_status(self, wrapper):
+        """当前曲的准备进度:阶段、已等待秒数、下载速度、缓冲进度、预计几秒后开始播放。"""
+        try:
+            item = wrapper.item()
+        except Exception:
+            return None
+        now = time.time()
+        stage = getattr(item, 'stage', None)
+        if stage is None:  # 本地文件 / 电台:没有下载阶段
+            stage = 'ready' if wrapper.is_ready() else 'starting'
+        if stage in ('ready',) and self.wait_for_ready:
+            stage = 'launching'  # 文件已就绪,马上开始解码
+        duration = getattr(item, 'duration', 0) or 0
+        buffer_secs = var.config.getint('bot', 'stream_buffer_seconds', fallback=30)
+        min_duration = var.config.getint('bot', 'stream_min_duration', fallback=300)
+        can_stream = (self._stream_enabled() and duration >= min_duration
+                      and not getattr(item, 'no_stream', False))
+        target_secs = min(duration - 1, self.playhead + buffer_secs) if can_stream and duration else duration
+        eta_fn = getattr(item, 'eta_to_playable', None)
+        eta = eta_fn(self.playhead, buffer_secs, can_stream) if eta_fn else None
+        estimated = False
+        if eta is None and hasattr(item, 'eta_estimate'):
+            eta, estimated = item.eta_estimate(), True  # 没有速度数据时按近期典型耗时估
+        progress = getattr(item, 'progress', 0.0) or 0.0
+        return {
+            'stage': stage,
+            'elapsed': round(now - getattr(self, '_wait_started', now), 1),
+            'stage_elapsed': round(now - getattr(item, 'stage_since', now), 1),
+            'eta': None if eta is None else round(eta, 1),
+            'eta_estimated': estimated,
+            'speed': round(getattr(item, 'speed', 0.0) or 0.0),
+            'downloaded': getattr(item, 'downloaded_bytes', 0) or 0,
+            'total': getattr(item, 'total_bytes', 0) or 0,
+            'progress': round(progress, 4),
+            'streaming': bool(can_stream),
+            'buffered_secs': round(progress * duration, 1) if duration else 0,
+            'target_secs': round(max(target_secs, 0), 1),
+        }
+
+    def _prep_detail(self, wrapper):
+        prep = self.prep_status(wrapper) or {}
+        stage, eta = prep.get('stage'), prep.get('eta')
+        if stage == 'fetching_info':
+            return tr('prep_fetching')
+        if stage in ('starting', 'pending'):
+            return tr('prep_connecting')
+        if eta is not None:
+            return tr('prep_buffering_eta', eta=max(1, int(round(eta))))
+        return tr('prep_buffering')
+
     def _report_download_progress(self, wrapper):
         # Announce download progress in chat, but only for downloads slow
         # enough to matter (e.g. a multi-hour video). Short downloads finish
         # within the grace period and produce no messages at all.
         grace = 25          # seconds of silence before the first message
-        poll = 4
+        poll = 2
         min_gap = 20        # minimum seconds between progress messages
         max_wait = 7200     # safety cap
 
@@ -461,8 +523,10 @@ class PlayerMixin:
 
         reported_any = False
         announced_unknown = False
+        announced_wait = False
         last_msg_time = 0.0
         next_milestone = 0.25
+        wait_notice_after = 6  # 有人在等、6 秒还没开始放,就说一下在等什么、还要多久
 
         while not self.exit and time.time() - start < max_wait:
             try:
@@ -472,11 +536,19 @@ class PlayerMixin:
                 break
 
             now = time.time()
-            if now - start >= grace and getattr(item, 'downloading', False):
+            # 只在 bot 真的在等这首时才播报:后台预下载、边下边播已经在放的,都不刷屏
+            waiting = self.is_waiting_for(wrapper.id)
+            if waiting and not announced_wait and now - start >= wait_notice_after:
+                title = getattr(item, 'title', '') or getattr(item, 'url', '') or '...'
+                self.send_channel_msg(tr('download_waiting', item=title, detail=self._prep_detail(wrapper)))
+                announced_wait = True
+                last_msg_time = now
+            if waiting and now - start >= grace and getattr(item, 'downloading', False):
                 progress = getattr(item, 'progress', 0.0) or 0.0
                 title = getattr(item, 'title', '') or getattr(item, 'url', '') or '...'
                 if progress <= 0.0:
-                    if not announced_unknown and now - last_msg_time >= min_gap:
+                    # 已经说过"在等什么、还要多久"就不再重复"开始下载"
+                    if not announced_unknown and not announced_wait and now - last_msg_time >= min_gap:
                         self.send_channel_msg(tr('download_progress_start', item=title))
                         announced_unknown = True
                         reported_any = True

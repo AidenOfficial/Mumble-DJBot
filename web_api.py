@@ -38,6 +38,14 @@ def _item_summary(wrapper, index):
         'duration': getattr(item, 'duration', 0) or 0,
         'has_thumbnail': bool(getattr(item, 'thumbnail', None)),
     }
+    if getattr(item, 'downloading', False):
+        # 后台下载中(预下载/边下边播):队列里显示进度,播放条上画"已缓冲"部分
+        summary['download'] = {
+            'progress': round(getattr(item, 'progress', 0.0) or 0.0, 4),
+            'speed': round(getattr(item, 'speed', 0.0) or 0.0),
+            'eta': getattr(item, 'download_eta', None),
+            'stage': getattr(item, 'stage', ''),
+        }
     return summary
 
 
@@ -57,6 +65,7 @@ def _status_payload():
         'current_index': var.playlist.current_index,
         'server_time': time.time(),
         'current': None,
+        'prep': None,
     }
     if current is not None:
         try:
@@ -65,6 +74,10 @@ def _status_payload():
             # SponsorBlock 要跳过的片段,前端在进度条上标出来
             skip_for = getattr(bot, 'skip_segments_for', None)
             payload['current']['skip_segments'] = skip_for(current.id) if skip_for else []
+            # 还没出声:告诉前端在等什么、还要多久
+            waiting = getattr(bot, 'is_waiting_for', None)
+            if waiting and waiting(current.id):
+                payload['prep'] = bot.prep_status(current)
         except Exception:
             # an item mid-eviction must not break the poll
             payload['current'] = None

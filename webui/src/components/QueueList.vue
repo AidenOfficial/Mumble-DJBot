@@ -125,6 +125,8 @@ async function act(body: QueueAction) {
           </p>
           <p class="truncate text-xs" :style="{ color: 'var(--c-text-muted)' }">
             {{ item.type }}<span v-if="item.duration"> · {{ formatTime(item.duration) }}</span>
+            <span v-if="item.download && !item.is_current" :style="{ color: 'var(--c-accent)' }">
+              · ⇣ {{ item.download.stage === 'downloading' ? `${Math.round(item.download.progress * 100)}%` : 'preparing' }}</span>
           </p>
         </div>
 
