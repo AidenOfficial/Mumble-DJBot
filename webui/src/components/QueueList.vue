@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchQueue, postQueue, thumbnailUrl, type QueueAction, type QueueItem } from '../api'
 import { formatTime, useStatus } from '../composables/useStatus'
+import AddToPlaylist from './AddToPlaylist.vue'
 
 const { status, applyStatus } = useStatus()
 
@@ -78,11 +79,14 @@ async function act(body: QueueAction) {
       <h2 class="text-sm font-semibold uppercase tracking-wider" :style="{ color: 'var(--c-text-muted)' }">
         Queue · {{ items.length }}
       </h2>
-      <button
-        class="cursor-pointer rounded-full border-0 px-3 py-1 text-xs"
-        :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }"
-        @click="act({ action: 'clear' })"
-      >Clear all</button>
+      <div class="flex items-center gap-1.5">
+        <AddToPlaylist :source="{ source: 'all_queue' }" label="Save queue" />
+        <button
+          class="cursor-pointer rounded-full border-0 px-3 py-1 text-xs"
+          :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }"
+          @click="act({ action: 'clear' })"
+        >Clear all</button>
+      </div>
     </div>
 
     <ul class="flex flex-col gap-1.5">
@@ -140,6 +144,7 @@ async function act(body: QueueAction) {
             title="Play next"
             @click="act({ action: 'top', index: i })"
           >⤴</button>
+          <AddToPlaylist :source="{ source: 'queue', index: i }" />
           <button
             class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
             :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { thumbnailUrl } from '../api'
 import Controls from './Controls.vue'
+import AddToPlaylist from './AddToPlaylist.vue'
 import { formatTime, useStatus } from '../composables/useStatus'
 
 const { status, error, clock, progress } = useStatus()
@@ -67,6 +68,7 @@ const sourceLabel = computed(() => {
             :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
           >{{ sourceLabel }}</span>
           <span v-if="current.artist && current.artist !== '??'">{{ current.artist }}</span>
+          <AddToPlaylist :source="{ source: 'current' }" label="Save" />
         </p>
       </template>
       <template v-else>

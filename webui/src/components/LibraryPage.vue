@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useStatus } from '../composables/useStatus'
+import AddToPlaylist from './AddToPlaylist.vue'
 
 interface LibItem {
   id: string
@@ -184,6 +185,7 @@ const TYPES = [
         <div class="flex shrink-0 gap-1">
           <span v-if="feedback[item.id]" class="px-2 py-1 text-xs" :style="{ color: 'var(--c-accent)' }">{{ feedback[item.id] }}</span>
           <template v-else>
+            <AddToPlaylist :source="{ source: 'library', item_id: item.id }" />
             <button
               class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"

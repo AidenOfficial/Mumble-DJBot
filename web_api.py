@@ -16,6 +16,7 @@ import util
 import variables as var
 import web_search
 from media.cache import get_cached_wrapper_from_scrap
+from web_users import current_user_name
 
 
 def _current_wrapper():
@@ -65,6 +66,10 @@ def _status_payload():
             # an item mid-eviction must not break the poll
             payload['current'] = None
     return payload
+
+
+# 其他蓝图(web_users)复用
+status_payload = _status_payload
 
 
 def _set_volume(value):
@@ -280,7 +285,7 @@ def create_blueprint(requires_auth):
         if not url or not url.lower().startswith(('http://', 'https://')):
             abort(400)
         music_wrapper = get_cached_wrapper_from_scrap(
-            type='url', url=url, user='Web Search')
+            type='url', url=url, user=current_user_name())
         var.playlist.append(music_wrapper)
         if len(var.playlist) == 2:
             # mirror the legacy add_url behavior: if this became the next

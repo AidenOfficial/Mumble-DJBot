@@ -2,7 +2,7 @@
 import sqlite3
 from functools import wraps
 from flask import Flask, render_template, request, redirect, send_file, send_from_directory, Response, jsonify, \
-    abort, session
+    abort, session, g
 from werkzeug.utils import secure_filename
 
 import variables as var
@@ -65,6 +65,8 @@ class ReverseProxied(object):
 
 
 import web_api
+import web_users
+from web_users import current_user_name
 
 root_dir = os.path.dirname(__file__)
 web = Flask(__name__, template_folder=os.path.join(root_dir, "web/templates"))
@@ -112,6 +114,12 @@ bad_access_count = {}
 banned_ip = []
 
 
+def _with_identity(f, auth_user, args, kwargs):
+    # 鉴权通过后解析身份(Cloudflare Access 邮箱 / Web 用户名),供点歌署名和个人歌单使用
+    g.web_identity = web_users.resolve_identity(auth_user)
+    return f(*args, **kwargs)
+
+
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -144,7 +152,7 @@ def requires_auth(f):
         if auth_method == 'token':
             if 'user' in session and 'token' not in request.args:
                 user = session['user']
-                return f(*args, **kwargs)
+                return _with_identity(f, session['user'], args, kwargs)
             elif 'token' in request.args:
                 token = request.args.get('token')
                 token_user = var.db.get("web_token", token, fallback=None)
@@ -160,7 +168,7 @@ def requires_auth(f):
                         f"web: new user access, token validated for the user: {token_user}, from ip {request.remote_addr}.")
                     session['token'] = token
                     session['user'] = token_user
-                    return f(*args, **kwargs)
+                    return _with_identity(f, token_user, args, kwargs)
 
             if request.remote_addr in bad_access_count:
                 bad_access_count[request.remote_addr] += 1
@@ -178,13 +186,16 @@ def requires_auth(f):
                                    command=f"{var.config.get('commands', 'command_symbol')[0]}"
                                            f"{var.config.get('commands', 'requests_webinterface_access')}")
 
-        return f(*args, **kwargs)
+        auth_user = request.authorization.username \
+            if auth_method == 'password' and request.authorization else None
+        return _with_identity(f, auth_user, args, kwargs)
 
     return decorated
 
 
 # JSON API for the new web interface (all routes under /api/)
 web.register_blueprint(web_api.create_blueprint(requires_auth))
+web.register_blueprint(web_users.create_blueprint(requires_auth))
 
 
 def tag_color(tag):
@@ -397,7 +408,7 @@ def post():
         log.debug("web: Post request from %s: %s" % (request.remote_addr, str(payload)))
 
         if 'add_item_at_once' in payload:
-            music_wrapper = get_cached_wrapper_by_id(payload['add_item_at_once'], user)
+            music_wrapper = get_cached_wrapper_by_id(payload['add_item_at_once'], current_user_name())
             if music_wrapper:
                 var.playlist.insert(var.playlist.current_index + 1, music_wrapper)
                 log.info('web: add to playlist(next): ' + music_wrapper.format_debug_string())
@@ -409,7 +420,7 @@ def post():
                 abort(404)
 
         if 'add_item_bottom' in payload:
-            music_wrapper = get_cached_wrapper_by_id(payload['add_item_bottom'], user)
+            music_wrapper = get_cached_wrapper_by_id(payload['add_item_bottom'], current_user_name())
 
             if music_wrapper:
                 var.playlist.append(music_wrapper)
@@ -418,7 +429,7 @@ def post():
                 abort(404)
 
         elif 'add_item_next' in payload:
-            music_wrapper = get_cached_wrapper_by_id(payload['add_item_next'], user)
+            music_wrapper = get_cached_wrapper_by_id(payload['add_item_next'], current_user_name())
             if music_wrapper:
                 var.playlist.insert(var.playlist.current_index + 1, music_wrapper)
                 log.info('web: add to playlist(next): ' + music_wrapper.format_debug_string())
@@ -426,7 +437,7 @@ def post():
                 abort(404)
 
         elif 'add_url' in payload:
-            music_wrapper = get_cached_wrapper_from_scrap(type='url', url=payload['add_url'], user=user)
+            music_wrapper = get_cached_wrapper_from_scrap(type='url', url=payload['add_url'], user=current_user_name())
             var.playlist.append(music_wrapper)
 
             log.info("web: add to playlist: " + music_wrapper.format_debug_string())
@@ -436,7 +447,7 @@ def post():
 
         elif 'add_radio' in payload:
             url = payload['add_radio']
-            music_wrapper = get_cached_wrapper_from_scrap(type='radio', url=url, user=user)
+            music_wrapper = get_cached_wrapper_from_scrap(type='radio', url=url, user=current_user_name())
             var.playlist.append(music_wrapper)
 
             log.info("cmd: add to playlist: " + music_wrapper.format_debug_string())
@@ -489,7 +500,7 @@ def post():
             time.sleep(0.1)
 
         elif 'add_tag' in payload:
-            music_wrappers = get_cached_wrappers_by_tags([payload['add_tag']], user)
+            music_wrappers = get_cached_wrappers_by_tags([payload['add_tag']], current_user_name())
             for music_wrapper in music_wrappers:
                 log.info("cmd: add to playlist: " + music_wrapper.format_debug_string())
             var.playlist.extend(music_wrappers)
@@ -657,7 +668,7 @@ def library():
                 items = dicts_to_items(var.music_db.query_music(condition))
                 music_wrappers = []
                 for item in items:
-                    music_wrapper = get_cached_wrapper(item, user)
+                    music_wrapper = get_cached_wrapper(item, current_user_name())
                     music_wrappers.append(music_wrapper)
 
                     log.info("cmd: add to playlist: " + music_wrapper.format_debug_string())
@@ -723,7 +734,7 @@ def library():
         elif payload['action'] == 'edit_tags':
             tags = list(dict.fromkeys(payload['tags'].split(",")))  # remove duplicated items
             if payload['id'] in var.cache:
-                music_wrapper = get_cached_wrapper_by_id(payload['id'], user)
+                music_wrapper = get_cached_wrapper_by_id(payload['id'], current_user_name())
                 music_wrapper.clear_tags()
                 music_wrapper.add_tags(tags)
                 var.playlist.version += 1

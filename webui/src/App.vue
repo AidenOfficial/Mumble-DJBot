@@ -5,11 +5,17 @@ import QueueList from './components/QueueList.vue'
 import SearchPage from './components/SearchPage.vue'
 import StatsPage from './components/StatsPage.vue'
 import LibraryPage from './components/LibraryPage.vue'
+import PlaylistsPage from './components/PlaylistsPage.vue'
+import UserChip from './components/UserChip.vue'
 
 type Theme = 'light' | 'dark' | 'auto'
 const theme = ref<Theme>('auto')
 
-type View = 'home' | 'search' | 'library' | 'stats'
+type View = 'home' | 'search' | 'library' | 'lists' | 'stats'
+const VIEWS: View[] = ['home', 'search', 'library', 'lists', 'stats']
+const VIEW_LABEL: Record<View, string> = {
+  home: 'Now Playing', search: 'Search', library: 'Library', lists: 'Playlists', stats: 'Stats',
+}
 const view = ref<View>('home')
 
 function applyTheme(t: Theme) {
@@ -41,7 +47,7 @@ onMounted(() => {
       class="sticky top-0 z-10 border-b backdrop-blur"
       :style="{ borderColor: 'var(--c-border)', background: 'color-mix(in srgb, var(--c-bg) 85%, transparent)' }"
     >
-      <div class="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3">
+      <div class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3">
         <div class="flex items-center gap-2">
           <span
             class="flex h-8 w-8 items-center justify-center rounded-full"
@@ -53,27 +59,34 @@ onMounted(() => {
           </span>
           <span class="text-base font-semibold tracking-tight">DJ Bot</span>
         </div>
-        <nav class="flex gap-1 rounded-full p-1" :style="{ background: 'var(--c-surface-2)' }">
+        <!-- 窄屏时导航换到第二行并可横向滚动 -->
+        <nav
+          class="order-last flex w-full gap-1 overflow-x-auto rounded-full p-1 md:order-none md:w-auto"
+          :style="{ background: 'var(--c-surface-2)' }"
+        >
           <button
-            v-for="v in (['home', 'search', 'library', 'stats'] as const)"
+            v-for="v in VIEWS"
             :key="v"
-            class="cursor-pointer rounded-full border-0 px-3.5 py-1.5 text-xs font-medium capitalize"
+            class="shrink-0 cursor-pointer rounded-full border-0 px-3.5 py-1.5 text-xs font-medium whitespace-nowrap"
             :style="view === v
               ? { background: 'var(--c-surface)', color: 'var(--c-text)', boxShadow: 'var(--shadow-1)' }
               : { background: 'transparent', color: 'var(--c-text-muted)' }"
             @click="view = v"
-          >{{ ({ home: 'Now Playing', search: 'Search', library: 'Library', stats: 'Stats' })[v] }}</button>
+          >{{ VIEW_LABEL[v] }}</button>
         </nav>
-        <button
-          class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-0 text-lg"
-          :style="{ background: 'var(--c-surface-2)' }"
-          :title="`Theme: ${theme}`"
-          @click="cycleTheme"
-        >
-          <span v-if="theme === 'light'">☀️</span>
-          <span v-else-if="theme === 'dark'">🌙</span>
-          <span v-else>🌗</span>
-        </button>
+        <div class="flex items-center gap-2">
+          <UserChip />
+          <button
+            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-0 text-lg"
+            :style="{ background: 'var(--c-surface-2)' }"
+            :title="`Theme: ${theme}`"
+            @click="cycleTheme"
+          >
+            <span v-if="theme === 'light'">☀️</span>
+            <span v-else-if="theme === 'dark'">🌙</span>
+            <span v-else>🌗</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -84,6 +97,7 @@ onMounted(() => {
       </template>
       <SearchPage v-else-if="view === 'search'" />
       <LibraryPage v-else-if="view === 'library'" />
+      <PlaylistsPage v-else-if="view === 'lists'" />
       <StatsPage v-else />
     </main>
   </div>

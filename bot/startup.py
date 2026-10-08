@@ -14,6 +14,7 @@ import media.playlist
 import util
 import variables as var
 from database import SettingsDatabase, MusicDatabase, DatabaseMigration, PlayHistoryDatabase
+from web_users import UserDatabase
 from media.cache import MusicCache
 
 from .cleanup import CacheCleaner
@@ -170,6 +171,10 @@ def main():
     # Play log for the web interface statistics; lives next to the music
     # database (own table, created on first use).
     var.play_history = PlayHistoryDatabase(var.music_db.db_path)
+
+    # Web 用户(Access 邮箱 → 别名)与个人歌单。放 settings 库:它总在磁盘上,
+    # 而 save_music_library=False 时 music_db 是 :memory:。
+    var.user_db = UserDatabase(var.settings_db_path)
 
     var.music_folder = util.solve_filepath(var.config.get('bot', 'music_folder'))
     if not var.music_folder.endswith(os.sep):
