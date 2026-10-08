@@ -5,6 +5,7 @@ import {
   type CacheEntry, type CacheSummary,
 } from '../api'
 import { formatTime } from '../composables/useStatus'
+import { t, timeAgo } from '../i18n'
 
 const summary = ref<CacheSummary | null>(null)
 const entries = ref<CacheEntry[]>([])
@@ -28,7 +29,7 @@ async function reload() {
     summary.value = data.summary
     entries.value = data.entries
   } catch {
-    say('Could not load the cache.')
+    say(t('cache.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -55,24 +56,15 @@ const pinnedPct = computed(() => {
   return Math.min(100, (s.pinned_bytes / s.limit_bytes) * 100)
 })
 
-function ago(ts: number): string {
-  if (!ts) return 'never'
-  const s = Date.now() / 1000 - ts
-  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`
-  if (s < 86400 * 60) return `${Math.round(s / 86400)} d ago`
-  return `${Math.round(s / 86400 / 30)} mo ago`
-}
-
 async function togglePin(e: CacheEntry) {
   rowBusy.value[e.id] = true
   try {
     await pinCache(e.id, !e.pinned)
     e.pinned = !e.pinned
-    say(e.pinned ? 'Pinned — automatic cleanup will keep it.' : 'Unpinned.')
+    say(t(e.pinned ? 'cache.pinned' : 'cache.unpinned'))
     reload()
   } catch {
-    say('Could not change the pin.')
+    say(t('cache.pinFailed'))
   } finally {
     rowBusy.value[e.id] = false
   }
@@ -80,14 +72,14 @@ async function togglePin(e: CacheEntry) {
 
 async function remove(e: CacheEntry) {
   const force = e.in_queue
-  if (force && !confirm('This song is in the queue. Delete the cached file anyway? It will be downloaded again when it plays.')) return
+  if (force && !confirm(t('cache.confirmQueued'))) return
   rowBusy.value[e.id] = true
   try {
     const freed = await deleteCache(e.id, force)
-    say(`Freed ${formatBytes(freed)}.`)
+    say(t('cache.freed', { size: formatBytes(freed) }))
     reload()
   } catch (err) {
-    say(err instanceof Error && err.message === 'busy' ? 'Still downloading — try again later.' : 'Delete failed.')
+    say(t(err instanceof Error && err.message === 'busy' ? 'cache.busy' : 'cache.deleteFailed'))
   } finally {
     rowBusy.value[e.id] = false
   }
@@ -97,31 +89,31 @@ async function saveToLibrary(e: CacheEntry) {
   rowBusy.value[e.id] = true
   try {
     const rv = await saveCacheToLibrary(e.id)
-    say(`Saved to the library as ${rv.path}`)
+    say(t('cache.savedTo', { path: rv.path }))
   } catch {
-    say('Could not save — is the download complete?')
+    say(t('cache.saveFailed'))
   } finally {
     rowBusy.value[e.id] = false
   }
 }
 
 async function cleanup(mode: 'limit' | 'expired' | 'unpinned') {
-  if (mode === 'unpinned' && !confirm('Delete every cached song that is not pinned (queued songs are kept)?')) return
+  if (mode === 'unpinned' && !confirm(t('cache.confirmUnpinned'))) return
   loading.value = true
   try {
     const rv = await cleanupCache(mode)
-    say(rv.freed ? `Freed ${formatBytes(rv.freed)}.` : 'Nothing to clean up.')
+    say(rv.freed ? t('cache.freed', { size: formatBytes(rv.freed) }) : t('cache.nothing'))
   } catch {
-    say('Cleanup failed.')
+    say(t('cache.cleanupFailed'))
   }
   await reload()
 }
 
 const FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: 'pinned', label: 'Pinned' },
-  { key: 'frequent', label: 'Frequent' },
-  { key: 'cold', label: 'Evictable' },
+  { key: 'all', label: 'common.all' },
+  { key: 'pinned', label: 'cache.fPinned' },
+  { key: 'frequent', label: 'cache.fFrequent' },
+  { key: 'cold', label: 'cache.fCold' },
 ] as const
 </script>
 
@@ -133,13 +125,13 @@ const FILTERS = [
         <p class="text-2xl font-semibold tabular-nums">
           {{ formatBytes(summary.total_bytes) }}
           <span class="text-sm font-normal" :style="{ color: 'var(--c-text-muted)' }">
-            <template v-if="summary.limit_bytes !== null"> of {{ formatBytes(summary.limit_bytes) }} limit</template>
-            <template v-else> · no size limit</template>
+            <template v-if="summary.limit_bytes !== null">{{ t('cache.ofLimit', { size: formatBytes(summary.limit_bytes) }) }}</template>
+            <template v-else>{{ t('cache.noLimit') }}</template>
           </span>
         </p>
         <p class="text-xs" :style="{ color: 'var(--c-text-muted)' }">
-          {{ summary.count }} song{{ summary.count === 1 ? '' : 's' }} cached ·
-          {{ formatBytes(summary.disk_free) }} free on disk
+          {{ t('cache.count', { n: summary.count }) }} ·
+          {{ t('cache.diskFree', { size: formatBytes(summary.disk_free) }) }}
         </p>
       </div>
       <div v-if="summary.limit_bytes" class="relative mt-3 h-2 w-full overflow-hidden rounded-full" :style="{ background: 'var(--c-surface-2)' }"
@@ -148,25 +140,22 @@ const FILTERS = [
         <div class="absolute inset-y-0 left-0 rounded-full" :style="{ width: `${pinnedPct}%`, background: 'var(--c-accent-strong)', opacity: 0.55 }" />
       </div>
       <p class="mt-2 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-        Over the limit, the least recently used songs are removed first. Pinned songs are never removed
-        automatically; songs played {{ summary.auto_keep_plays }}+ times go last and skip the
-        {{ summary.keep_days }}-day expiry.
+        {{ t('cache.policy', { plays: summary.auto_keep_plays, days: summary.keep_days }) }}
       </p>
       <p v-if="!summary.persistent" class="mt-3 rounded-lg px-3 py-2 text-xs"
          :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-danger)' }">
-        The cache lives in {{ summary.folder }}, which is wiped whenever the container is recreated.
-        Mount a volume and set BAM_TMP_FOLDER (see docker-compose.yml) to keep it.
+        {{ t('cache.ephemeral', { folder: summary.folder }) }}
       </p>
       <div class="mt-4 flex flex-wrap gap-2">
         <button class="cursor-pointer rounded-full border-0 px-3.5 py-1.5 text-xs font-semibold"
                 :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
-                :disabled="loading" @click="cleanup('limit')">Trim to limit</button>
+                :disabled="loading" @click="cleanup('limit')">{{ t('cache.trim') }}</button>
         <button class="cursor-pointer rounded-full border-0 px-3.5 py-1.5 text-xs"
                 :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                :disabled="loading" @click="cleanup('expired')">Remove expired</button>
+                :disabled="loading" @click="cleanup('expired')">{{ t('cache.expired') }}</button>
         <button class="cursor-pointer rounded-full border-0 px-3.5 py-1.5 text-xs"
                 :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
-                :disabled="loading" @click="cleanup('unpinned')">Clear unpinned…</button>
+                :disabled="loading" @click="cleanup('unpinned')">{{ t('cache.clearUnpinned') }}</button>
       </div>
     </div>
 
@@ -179,13 +168,13 @@ const FILTERS = [
         <button v-for="f in FILTERS" :key="f.key"
                 class="cursor-pointer rounded-full border-0 px-3 py-1 text-xs font-medium"
                 :style="filter === f.key ? { background: 'var(--c-accent)', color: 'var(--c-on-accent)' } : { background: 'transparent', color: 'var(--c-text-muted)' }"
-                @click="filter = f.key">{{ f.label }}</button>
+                @click="filter = f.key">{{ t(f.label) }}</button>
       </div>
       <select v-model="sortBy" class="ml-auto rounded-full border px-3 py-1.5 text-xs outline-none"
               :style="{ background: 'var(--c-surface)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }">
-        <option value="last_used">Recently used</option>
-        <option value="size">Largest</option>
-        <option value="plays">Most played</option>
+        <option value="last_used">{{ t('cache.sortRecent') }}</option>
+        <option value="size">{{ t('cache.sortSize') }}</option>
+        <option value="plays">{{ t('cache.sortPlays') }}</option>
       </select>
     </div>
 
@@ -197,40 +186,40 @@ const FILTERS = [
           <p class="truncate text-sm font-medium" :title="e.url || e.id">
             <a v-if="e.url" :href="e.url" target="_blank" rel="noopener noreferrer" class="no-underline"
                :style="{ color: 'var(--c-text)' }">{{ e.title || e.url }}</a>
-            <span v-else :style="{ color: 'var(--c-text-muted)' }">{{ e.title || `Unknown (${e.id.slice(0, 8)})` }}</span>
+            <span v-else :style="{ color: 'var(--c-text-muted)' }">{{ e.title || t('cache.unknown', { id: e.id.slice(0, 8) }) }}</span>
           </p>
           <p class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" :style="{ color: 'var(--c-text-muted)' }">
             <span class="tabular-nums">{{ formatBytes(e.size) }}</span>
             <span v-if="e.duration" class="tabular-nums">{{ formatTime(e.duration) }}</span>
-            <span>{{ e.plays }} play{{ e.plays === 1 ? '' : 's' }}</span>
-            <span>used {{ ago(e.last_used) }}</span>
+            <span>{{ t('common.plays', { n: e.plays }) }}</span>
+            <span>{{ t('cache.used', { ago: timeAgo(e.last_used) }) }}</span>
             <span v-if="e.pinned" class="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                  :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }">Pinned</span>
+                  :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }">{{ t('cache.fPinned') }}</span>
             <span v-if="e.frequent" class="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                  :style="{ background: 'var(--c-surface-2)', color: 'var(--c-success)' }">Frequent</span>
+                  :style="{ background: 'var(--c-surface-2)', color: 'var(--c-success)' }">{{ t('cache.fFrequent') }}</span>
             <span v-if="e.in_queue" class="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                  :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }">In queue</span>
+                  :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }">{{ t('cache.inQueue') }}</span>
             <span v-if="e.downloading" class="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                  :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }">Downloading</span>
+                  :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }">{{ t('cache.downloading') }}</span>
           </p>
         </div>
         <div class="flex shrink-0 items-center gap-1">
           <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                   :style="e.pinned ? { background: 'var(--c-accent)', color: 'var(--c-on-accent)' } : { background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                  :title="e.pinned ? 'Unpin' : 'Pin: never remove automatically'"
+                  :title="t(e.pinned ? 'cache.unpin' : 'cache.pin')"
                   :disabled="rowBusy[e.id]" @click="togglePin(e)">📌</button>
           <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                   :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                  title="Copy into the local library (music_folder/saved)"
+                  :title="t('cache.copy')"
                   :disabled="rowBusy[e.id] || !e.complete" @click="saveToLibrary(e)">💾</button>
           <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                   :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
-                  title="Delete cached file" :disabled="rowBusy[e.id] || e.downloading" @click="remove(e)">🗑</button>
+                  :title="t('cache.delete')" :disabled="rowBusy[e.id] || e.downloading" @click="remove(e)">🗑</button>
         </div>
       </li>
     </ul>
     <p v-else-if="!loading" class="mt-8 text-center text-sm" :style="{ color: 'var(--c-text-muted)' }">
-      {{ entries.length ? 'Nothing matches this filter.' : 'The download cache is empty.' }}
+      {{ t(entries.length ? 'cache.noMatch' : 'cache.empty') }}
     </p>
   </section>
 </template>

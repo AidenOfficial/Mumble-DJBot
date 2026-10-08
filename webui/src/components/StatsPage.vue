@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { formatTime } from '../composables/useStatus'
+import { t, typeLabel } from '../i18n'
 
 interface Stats {
   total_plays: number
@@ -31,11 +32,11 @@ onMounted(async () => {
 
 // Categorical palette for source identity - validated (dataviz six checks)
 // for both surfaces; light mode relies on the visible labels for relief.
-const TYPE_COLORS: Record<string, { light: string; dark: string; label: string }> = {
-  url: { light: '#6d5ef2', dark: '#8577ff', label: 'Stream' },
-  file: { light: '#1baf7a', dark: '#199e70', label: 'Library' },
-  radio: { light: '#eda100', dark: '#c98500', label: 'Radio' },
-  playlist: { light: '#e87ba4', dark: '#d55181', label: 'Playlist' },
+const TYPE_COLORS: Record<string, { light: string; dark: string }> = {
+  url: { light: '#6d5ef2', dark: '#8577ff' },
+  file: { light: '#1baf7a', dark: '#199e70' },
+  radio: { light: '#eda100', dark: '#c98500' },
+  playlist: { light: '#e87ba4', dark: '#d55181' },
 }
 const isDark = () =>
   document.documentElement.getAttribute('data-theme') === 'dark' ||
@@ -46,9 +47,6 @@ function typeColor(t: string): string {
   const entry = TYPE_COLORS[t]
   if (!entry) return 'var(--c-text-faint)'
   return isDark() ? entry.dark : entry.light
-}
-function typeLabel(t: string): string {
-  return TYPE_COLORS[t]?.label ?? (t || 'other')
 }
 
 const totalHours = computed(() =>
@@ -66,15 +64,15 @@ const HOUR_LABELS = [0, 6, 12, 18]
 <template>
   <section class="mx-auto w-full max-w-3xl px-4 py-8">
     <p v-if="error" class="text-center text-sm" :style="{ color: 'var(--c-text-muted)' }">
-      Statistics are unavailable.
+      {{ t('stats.unavailable') }}
     </p>
     <p v-else-if="!stats" class="text-center text-sm" :style="{ color: 'var(--c-text-faint)' }">
-      Loading...
+      {{ t('common.loading') }}
     </p>
 
     <template v-else-if="stats.total_plays === 0">
       <p class="mt-10 text-center text-sm" :style="{ color: 'var(--c-text-muted)' }">
-        No plays recorded yet - statistics appear once the bot starts playing.
+        {{ t('stats.noPlays') }}
       </p>
     </template>
 
@@ -83,10 +81,10 @@ const HOUR_LABELS = [0, 6, 12, 18]
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div
           v-for="tile in ([
-            { label: 'Total plays', value: String(stats.total_plays), sub: undefined },
-            { label: 'Hours played', value: totalHours, sub: undefined },
-            { label: 'Unique tracks', value: String(stats.unique_tracks), sub: undefined },
-            { label: 'Busiest day', value: stats.busiest_day ? String(stats.busiest_day.count) : '-',
+            { label: t('stats.totalPlays'), value: String(stats.total_plays), sub: undefined },
+            { label: t('stats.hours'), value: totalHours, sub: undefined },
+            { label: t('stats.unique'), value: String(stats.unique_tracks), sub: undefined },
+            { label: t('stats.busiest'), value: stats.busiest_day ? String(stats.busiest_day.count) : '-',
               sub: stats.busiest_day?.date },
           ] as { label: string; value: string; sub?: string }[])"
           :key="tile.label"
@@ -102,7 +100,7 @@ const HOUR_LABELS = [0, 6, 12, 18]
 
       <!-- source share -->
       <div class="mt-6 rounded-xl p-4" :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
-        <h2 class="mb-3 text-sm font-semibold">Where the music comes from</h2>
+        <h2 class="mb-3 text-sm font-semibold">{{ t('stats.sources') }}</h2>
         <div class="flex h-3 w-full gap-[2px] overflow-hidden rounded-full">
           <div
             v-for="row in stats.by_type"
@@ -122,7 +120,7 @@ const HOUR_LABELS = [0, 6, 12, 18]
 
       <!-- hour histogram -->
       <div class="mt-4 rounded-xl p-4" :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
-        <h2 class="mb-3 text-sm font-semibold">When the channel listens</h2>
+        <h2 class="mb-3 text-sm font-semibold">{{ t('stats.whenListens') }}</h2>
         <div class="flex h-24 items-end gap-[2px]">
           <div
             v-for="(count, h) in stats.hours"
@@ -134,7 +132,7 @@ const HOUR_LABELS = [0, 6, 12, 18]
               opacity: count ? 1 : 0.15,
               minHeight: '2px',
             }"
-            :title="`${String(h).padStart(2, '0')}:00 - ${count} play${count === 1 ? '' : 's'}`"
+            :title="t('stats.hourTip', { h: String(h).padStart(2, '0'), n: count })"
           />
         </div>
         <div class="mt-1 flex justify-between text-[10px] tabular-nums" :style="{ color: 'var(--c-text-faint)' }">
@@ -147,8 +145,8 @@ const HOUR_LABELS = [0, 6, 12, 18]
       <div class="mt-4 grid gap-4 sm:grid-cols-2">
         <div class="rounded-xl p-4" :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
           <h2 class="mb-3 text-sm font-semibold">
-            Most played
-            <span v-if="stats.top_tracks[0]" class="ml-1 rounded-full px-1.5 py-0.5 text-[10px]" :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }">镇站之宝</span>
+            {{ t('stats.mostPlayed') }}
+            <span v-if="stats.top_tracks[0]" class="ml-1 rounded-full px-1.5 py-0.5 text-[10px]" :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }">{{ t('stats.crown') }}</span>
           </h2>
           <ol class="flex flex-col gap-2">
             <li v-for="t in stats.top_tracks.slice(0, 8)" :key="t.item_id" class="text-xs">
@@ -165,7 +163,7 @@ const HOUR_LABELS = [0, 6, 12, 18]
 
         <div class="flex flex-col gap-4">
           <div class="rounded-xl p-4" :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
-            <h2 class="mb-3 text-sm font-semibold">Top requesters</h2>
+            <h2 class="mb-3 text-sm font-semibold">{{ t('stats.topUsers') }}</h2>
             <ol class="flex flex-col gap-2">
               <li v-for="u in stats.top_users.slice(0, 5)" :key="u.user" class="text-xs">
                 <div class="mb-0.5 flex justify-between gap-2">
@@ -180,7 +178,7 @@ const HOUR_LABELS = [0, 6, 12, 18]
           </div>
 
           <div v-if="stats.most_skipped.length" class="rounded-xl p-4" :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
-            <h2 class="mb-2 text-sm font-semibold">Most skipped</h2>
+            <h2 class="mb-2 text-sm font-semibold">{{ t('stats.mostSkipped') }}</h2>
             <ul class="flex flex-col gap-1">
               <li v-for="s in stats.most_skipped.slice(0, 3)" :key="s.item_id" class="flex justify-between gap-2 text-xs">
                 <span class="truncate" :title="s.title">{{ s.title || s.item_id }}</span>
@@ -192,7 +190,7 @@ const HOUR_LABELS = [0, 6, 12, 18]
       </div>
 
       <p class="mt-4 text-center text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-        {{ formatTime(stats.total_seconds) }} of music since tracking began.
+        {{ t('stats.total', { t: formatTime(stats.total_seconds) }) }}
       </p>
     </template>
   </section>

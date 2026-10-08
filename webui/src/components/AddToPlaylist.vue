@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { addToPlaylist, createPlaylist, type PlaylistSource } from '../api'
 import { useMe } from '../composables/useMe'
+import { t } from '../i18n'
 
 const props = withDefaults(defineProps<{ source: PlaylistSource; label?: string }>(), { label: '' })
 
@@ -24,11 +25,11 @@ async function addTo(id: number) {
   feedback.value = '...'
   try {
     const rv = await addToPlaylist(id, props.source)
-    feedback.value = rv.added ? `Added to ${rv.playlist.name} ✓` : `Already in ${rv.playlist.name}`
+    feedback.value = t(rv.added ? 'atp.added' : 'atp.already', { name: rv.playlist.name })
     reloadPlaylists()
     setTimeout(() => (open.value = false), 900)
   } catch {
-    feedback.value = 'Failed.'
+    feedback.value = t('atp.failed')
   }
 }
 
@@ -41,7 +42,7 @@ async function createAndAdd() {
     creating.value = false
     await addTo(pl.id)
   } catch {
-    feedback.value = 'Could not create playlist.'
+    feedback.value = t('atp.createFailed')
   }
 }
 
@@ -57,7 +58,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
     <button
       class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-      title="Add to one of my playlists"
+      :title="t('atp.title')"
       @click.stop="toggle"
     >♡<span v-if="props.label"> {{ props.label }}</span></button>
 
@@ -68,7 +69,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       @click.stop
     >
       <p class="px-2 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider" :style="{ color: 'var(--c-text-faint)' }">
-        Add to playlist
+        {{ t('atp.header') }}
       </p>
       <ul class="max-h-56 overflow-y-auto">
         <li v-for="pl in playlists" :key="pl.id">
@@ -86,7 +87,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <input
           v-model="newName"
           maxlength="60"
-          placeholder="Playlist name"
+          :placeholder="t('atp.name')"
           class="min-w-0 flex-1 rounded-md border px-2 py-1 text-xs outline-none"
           :style="{ background: 'var(--c-bg)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
           autofocus
@@ -95,14 +96,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           type="submit"
           class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs font-semibold"
           :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
-        >Add</button>
+        >{{ t('atp.add') }}</button>
       </form>
       <button
         v-else
         class="w-full cursor-pointer rounded-lg border-0 bg-transparent px-2 py-1.5 text-left text-sm"
         :style="{ color: 'var(--c-accent)' }"
         @click="creating = true"
-      >＋ New playlist…</button>
+      >{{ t('atp.new') }}</button>
       <p v-if="feedback" class="px-2 pt-1 pb-0.5 text-xs" :style="{ color: 'var(--c-text-muted)' }">{{ feedback }}</p>
     </div>
   </div>

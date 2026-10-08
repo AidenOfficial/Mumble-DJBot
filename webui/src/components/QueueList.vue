@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchQueue, postQueue, thumbnailUrl, type QueueAction, type QueueItem } from '../api'
 import { formatTime, useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
+import { t, typeLabel } from '../i18n'
 
 const { status, applyStatus } = useStatus()
 
@@ -77,15 +78,15 @@ async function act(body: QueueAction) {
   <section v-if="items.length" class="mx-auto w-full max-w-3xl px-4 pb-12">
     <div class="mb-3 flex items-center justify-between">
       <h2 class="text-sm font-semibold uppercase tracking-wider" :style="{ color: 'var(--c-text-muted)' }">
-        Queue · {{ items.length }}
+        {{ t('queue.title', { n: items.length }) }}
       </h2>
       <div class="flex items-center gap-1.5">
-        <AddToPlaylist :source="{ source: 'all_queue' }" label="Save queue" />
+        <AddToPlaylist :source="{ source: 'all_queue' }" :label="t('queue.save')" />
         <button
           class="cursor-pointer rounded-full border-0 px-3 py-1 text-xs"
           :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }"
           @click="act({ action: 'clear' })"
-        >Clear all</button>
+        >{{ t('queue.clear') }}</button>
       </div>
     </div>
 
@@ -121,12 +122,12 @@ async function act(body: QueueAction) {
         <!-- text -->
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium" :title="item.title">
-            <span v-if="item.is_current" :style="{ color: 'var(--c-accent)' }">▸ </span>{{ item.title || 'Untitled' }}
+            <span v-if="item.is_current" :style="{ color: 'var(--c-accent)' }">▸ </span>{{ item.title || t('common.untitled') }}
           </p>
           <p class="truncate text-xs" :style="{ color: 'var(--c-text-muted)' }">
-            {{ item.type }}<span v-if="item.duration"> · {{ formatTime(item.duration) }}</span>
+            {{ typeLabel(item.type) }}<span v-if="item.duration"> · {{ formatTime(item.duration) }}</span>
             <span v-if="item.download && !item.is_current" :style="{ color: 'var(--c-accent)' }">
-              · ⇣ {{ item.download.stage === 'downloading' ? `${Math.round(item.download.progress * 100)}%` : 'preparing' }}</span>
+              · ⇣ {{ item.download.stage === 'downloading' ? `${Math.round(item.download.progress * 100)}%` : t('queue.preparing') }}</span>
           </p>
         </div>
 
@@ -136,21 +137,21 @@ async function act(body: QueueAction) {
             v-if="!item.is_current"
             class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
             :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-            title="Play now"
+            :title="t('common.playNow')"
             @click="act({ action: 'play', index: i })"
           >▶</button>
           <button
             v-if="!item.is_current && i !== (status?.current_index ?? -1) + 1"
             class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
             :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-            title="Play next"
+            :title="t('common.playNext')"
             @click="act({ action: 'top', index: i })"
           >⤴</button>
           <AddToPlaylist :source="{ source: 'queue', index: i }" />
           <button
             class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
             :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
-            title="Remove"
+            :title="t('common.remove')"
             @click="act({ action: 'remove', index: i })"
           >✕</button>
         </div>

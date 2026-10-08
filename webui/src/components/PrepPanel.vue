@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatBytes, type PrepStatus } from '../api'
+import { t } from '../i18n'
 
 // 当前曲还没出声时显示:在等什么(阶段)、已经等了多久、还要多久开始播放
 const props = defineProps<{ prep: PrepStatus; syncedAt: number }>()
@@ -20,10 +21,10 @@ const elapsed = computed(() => props.prep.elapsed + sinceSync.value)
 const eta = computed(() => (props.prep.eta === null ? null : Math.max(0, props.prep.eta - sinceSync.value)))
 
 const STEPS = [
-  { key: 'info', label: 'Fetching info', hint: 'Asking the site for the audio stream' },
-  { key: 'connect', label: 'Connecting', hint: 'Opening the download' },
-  { key: 'buffer', label: 'Buffering', hint: 'Downloading enough audio to start' },
-  { key: 'play', label: 'Playing', hint: '' },
+  { key: 'info', label: 'prep.info', hint: 'prep.infoHint' },
+  { key: 'connect', label: 'prep.connect', hint: 'prep.connectHint' },
+  { key: 'buffer', label: 'prep.buffer', hint: 'prep.bufferHint' },
+  { key: 'play', label: 'prep.play', hint: null },
 ] as const
 const stepIndex = computed(() => {
   switch (props.prep.stage) {
@@ -44,16 +45,16 @@ const bufferPct = computed(() => {
 })
 
 function secs(n: number) {
-  if (n < 10) return `${n.toFixed(1)}s`
-  if (n < 90) return `${Math.round(n)}s`
-  return `${Math.floor(n / 60)}m ${Math.round(n % 60)}s`
+  if (n < 10) return t('prep.secs', { n: n.toFixed(1) })
+  if (n < 90) return t('prep.secs', { n: Math.round(n) })
+  return t('prep.minSecs', { m: Math.floor(n / 60), s: Math.round(n % 60) })
 }
 
 const etaText = computed(() => {
-  if (props.prep.stage === 'launching' || props.prep.stage === 'ready') return 'Starting now…'
-  if (eta.value === null) return 'Estimating…'
-  if (eta.value < 0.5) return 'Any moment now…'
-  return `Starts in ${props.prep.eta_estimated ? '~' : ''}${secs(eta.value)}`
+  if (props.prep.stage === 'launching' || props.prep.stage === 'ready') return t('prep.startingNow')
+  if (eta.value === null) return t('prep.estimating')
+  if (eta.value < 0.5) return t('prep.anyMoment')
+  return t('prep.startsIn', { eta: `${props.prep.eta_estimated ? '~' : ''}${secs(eta.value)}` })
 })
 </script>
 
@@ -62,7 +63,7 @@ const etaText = computed(() => {
        role="status" aria-live="polite">
     <div class="flex items-baseline justify-between gap-2">
       <p class="text-sm font-semibold" :style="{ color: 'var(--c-accent)' }">{{ etaText }}</p>
-      <p class="text-xs tabular-nums" :style="{ color: 'var(--c-text-muted)' }">waiting {{ secs(elapsed) }}</p>
+      <p class="text-xs tabular-nums" :style="{ color: 'var(--c-text-muted)' }">{{ t('prep.waiting', { t: secs(elapsed) }) }}</p>
     </div>
 
     <!-- 阶段 -->
@@ -82,27 +83,27 @@ const etaText = computed(() => {
         </div>
         <p class="mt-1 truncate text-[11px]"
            :style="{ color: i === stepIndex ? 'var(--c-text)' : 'var(--c-text-faint)', fontWeight: i === stepIndex ? 600 : 400 }">
-          {{ i < stepIndex ? '✓ ' : '' }}{{ step.label }}
+          {{ i < stepIndex ? '✓ ' : '' }}{{ t(step.label) }}
         </p>
       </li>
     </ol>
     <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-      {{ STEPS[stepIndex]?.hint }}<template v-if="prep.stage_elapsed > 0 && stepIndex < 3"> · {{ secs(prep.stage_elapsed + sinceSync) }}</template>
+      {{ STEPS[stepIndex]?.hint ? t(STEPS[stepIndex]!.hint!) : '' }}<template v-if="prep.stage_elapsed > 0 && stepIndex < 3"> · {{ secs(prep.stage_elapsed + sinceSync) }}</template>
     </p>
 
     <!-- 下载细节 -->
     <div v-if="prep.stage === 'downloading'" class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums"
          :style="{ color: 'var(--c-text-muted)' }">
-      <span v-if="prep.streaming">buffered {{ Math.floor(prep.buffered_secs) }}s / {{ Math.ceil(prep.target_secs) }}s needed</span>
-      <span v-else>{{ Math.round(prep.progress * 100) }}% downloaded</span>
+      <span v-if="prep.streaming">{{ t('prep.buffered', { have: Math.floor(prep.buffered_secs), need: Math.ceil(prep.target_secs) }) }}</span>
+      <span v-else>{{ t('prep.downloaded', { pct: Math.round(prep.progress * 100) }) }}</span>
       <span v-if="prep.speed">{{ formatBytes(prep.speed) }}/s</span>
       <span v-if="prep.total">{{ formatBytes(prep.downloaded) }} / {{ formatBytes(prep.total) }}</span>
     </div>
     <p v-if="prep.streaming && stepIndex >= 1" class="mt-2 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-      Long video: playback starts as soon as {{ Math.ceil(prep.target_secs) }}s of audio is ready; the rest keeps downloading in the background.
+      {{ t('prep.streamingHint', { n: Math.ceil(prep.target_secs) }) }}
     </p>
     <p v-else-if="!prep.streaming && prep.stage === 'downloading'" class="mt-2 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-      This one plays once the whole file is downloaded.
+      {{ t('prep.wholeFileHint') }}
     </p>
   </div>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useStatus } from '../composables/useStatus'
+import { modeLabel, t } from '../i18n'
 
 const { status, control } = useStatus()
 
@@ -39,7 +40,7 @@ const MODES = ['one-shot', 'repeat', 'single', 'random', 'autoplay']
       <button
         class="flex h-14 w-14 cursor-pointer items-center justify-center rounded-full border-0"
         :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)', boxShadow: 'var(--shadow-1)' }"
-        :title="status?.play ? 'Pause' : 'Play'"
+        :title="status?.play ? t('ctl.pause') : t('ctl.play')"
         @click="togglePlay"
       >
         <svg v-if="status?.play" viewBox="0 0 24 24" class="h-6 w-6" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
@@ -48,7 +49,7 @@ const MODES = ['one-shot', 'repeat', 'single', 'random', 'autoplay']
       <button
         class="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0"
         :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-        title="Skip"
+        :title="t('ctl.skip')"
         @click="control({ action: 'skip' })"
       >
         <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor"><path d="M6 6l8.5 6L6 18V6zM16 6h2v12h-2z" /></svg>
@@ -67,7 +68,7 @@ const MODES = ['one-shot', 'repeat', 'single', 'random', 'autoplay']
         max="1"
         step="0.01"
         class="volume-slider w-full"
-        aria-label="Volume"
+        :aria-label="t('ctl.volume')"
         @input="onVolumeInput"
       />
       <span class="w-8 text-right text-xs tabular-nums" :style="{ color: 'var(--c-text-muted)' }">
@@ -75,30 +76,30 @@ const MODES = ['one-shot', 'repeat', 'single', 'random', 'autoplay']
       </span>
       <span
         v-if="status?.ducking"
-        class="rounded-full px-2 py-0.5 text-xs"
+        class="shrink-0 rounded-full px-2 py-0.5 text-xs whitespace-nowrap"
         :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
-        title="Volume lowered while someone is talking"
-      >duck</span>
+        :title="t('ctl.duckHint')"
+      >{{ t('ctl.duck') }}</span>
     </div>
 
     <!-- mode -->
     <div
-      class="flex gap-1 rounded-full p-1"
+      class="flex max-w-full gap-1 overflow-x-auto rounded-full p-1"
       :style="{ background: 'var(--c-surface-2)' }"
       role="radiogroup"
-      aria-label="Playback mode"
+      :aria-label="t('ctl.mode')"
     >
       <button
         v-for="m in MODES"
         :key="m"
-        class="cursor-pointer rounded-full border-0 px-3 py-1 text-xs font-medium capitalize"
+        class="shrink-0 cursor-pointer rounded-full border-0 px-2 py-1 text-xs font-medium whitespace-nowrap capitalize sm:px-3"
         :style="status?.mode === m
           ? { background: 'var(--c-accent)', color: 'var(--c-on-accent)' }
           : { background: 'transparent', color: 'var(--c-text-muted)' }"
         role="radio"
         :aria-checked="status?.mode === m"
         @click="control({ action: 'mode', mode: m })"
-      >{{ m }}</button>
+      >{{ modeLabel(m) }}</button>
     </div>
   </div>
 </template>
