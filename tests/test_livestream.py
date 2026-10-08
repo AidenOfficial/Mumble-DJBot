@@ -16,14 +16,24 @@ import variables as var  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+_saved_config = None
+
+
 def setUpModule():
+    global _saved_config
+    _saved_config = var.config
     config = configparser.ConfigParser(interpolation=None, allow_no_value=True)
     config.read(os.path.join(ROOT, "configuration.default.ini"), encoding="utf-8")
     var.config = config
     constants.load_lang("en_US")
 
 
+def tearDownModule():
+    var.config = _saved_config
+
+
 import media.livestream as live  # noqa: E402
+import media.url  # noqa: E402,F401  注册 'url' 的 id 生成器(以前靠别的测试文件顺带导入)
 from media.item import ValidationFailedError, item_loaders, item_id_generators  # noqa: E402
 from bot.player import PlayerMixin  # noqa: E402
 

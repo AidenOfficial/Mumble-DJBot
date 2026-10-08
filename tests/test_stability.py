@@ -67,6 +67,7 @@ class Player(PlayerMixin):
         self._ffmpeg_stderr_lines = collections.deque(maxlen=20)
         self._active_downloads = set()
         self._download_lock = threading.Lock()
+        self.wait_for_ready = True  # 下载线程跑的是主循环正在等的那首
         self.messages = []
 
     def send_channel_msg(self, msg):
@@ -130,7 +131,7 @@ class DownloadThreadTest(Base):
         var.playlist = mock.Mock()
         player._active_downloads.add(wrapper.id)
         self.assertFalse(player._download(wrapper))
-        var.playlist.remove_by_id.assert_called_once_with(wrapper.id)
+        var.playlist.remove_by_id.assert_called_once_with(wrapper.id, rewind=False)
         self.assertNotIn(wrapper.id, player._active_downloads)
         self.assertEqual(len(player.messages), 1)
 

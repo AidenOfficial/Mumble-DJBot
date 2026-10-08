@@ -132,8 +132,14 @@ class LaunchInstrumentationTestCase(unittest.TestCase):
             def playable_from(self, *a):
                 return True
 
-        saved = var.play_history
+        import configparser
+        from unittest import mock
+        saved = var.play_history, var.config
         var.play_history = Recorder()
+        # launch_music 在记录之前就要读配置;以前靠别的测试模块泄漏的 var.config 才能通过
+        var.config = configparser.ConfigParser(interpolation=None, allow_no_value=True)
+        var.config.read(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     'configuration.default.ini'), encoding='utf-8')
         try:
             player = PlayerMixin.__new__(PlayerMixin)
             import logging
@@ -142,17 +148,18 @@ class LaunchInstrumentationTestCase(unittest.TestCase):
             Recorder.rows = recorded
 
             # Only exercise the instrumentation block, not the ffmpeg launch:
-            # replicate the guard exactly by calling launch_music and catching
-            # the inevitable failure when it reaches config access.
-            for start_from in (0, 42.5):
-                try:
-                    player.launch_music(FakeWrapper(), start_from)
-                except Exception:
-                    pass
+            # call launch_music and swallow the failure once it gets past the
+            # recording step (Popen is stubbed so no ffmpeg is spawned).
+            with mock.patch('bot.player.sp.Popen', side_effect=OSError('no ffmpeg in tests')):
+                for start_from in (0, 42.5):
+                    try:
+                        player.launch_music(FakeWrapper(), start_from)
+                    except Exception:
+                        pass
             self.assertEqual(1, len(recorded))
             self.assertEqual(('x1', 'T', 'url', 'alice', 100), recorded[0])
         finally:
-            var.play_history = saved
+            var.play_history, var.config = saved
 
 
 if __name__ == '__main__':

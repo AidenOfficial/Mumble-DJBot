@@ -86,7 +86,9 @@ def cmd_play_file_match(bot, user, text, command, parameter, do_not_refresh_cach
             music_wrappers = []
             for file_dict in file_dicts:
                 file = file_dict['title']
-                match = re.search(parameter, file)
+                # 按字面量匹配(不区分大小写)。以前直接把用户输入当正则,
+                # 一条 (\w+\s?)*$ 就能让整个进程卡死几分钟(正则匹配期间不释放 GIL)。
+                match = re.search(re.escape(parameter), file, re.IGNORECASE)
                 if match and match[0]:
                     count += 1
                     music_wrapper = get_cached_wrapper(dict_to_item(file_dict), user)
@@ -356,7 +358,7 @@ def cmd_list_file(bot, user, text, command, parameter):
         count = 0
         for index, file in enumerate(files):
             if parameter:
-                match = re.search(parameter, file['path'])
+                match = re.search(re.escape(parameter), file['path'], re.IGNORECASE)  # 字面量,同 !filematch
                 if not match:
                     continue
 

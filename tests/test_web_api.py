@@ -71,6 +71,11 @@ class FakePlaylist(list):
             self.current_index -= 1
         return removed
 
+    def remove_current(self, rewind):
+        removed = self.remove(self.current_index)
+        self.stay_once = rewind
+        return removed
+
 
 class FakeVolume:
     plain_volume_set = 0.42
@@ -119,6 +124,14 @@ class FakeBot:
 
     def async_download_next(self):
         self.calls.append('async_download_next')
+
+    def start_download(self, item):
+        self.calls.append(('start_download', item.id))
+
+    def remove_from_queue(self, index):
+        # 队列删除走真实实现(删当前曲时的指针处理就在这里)
+        from bot.player import PlayerMixin
+        return PlayerMixin.remove_from_queue(self, index)
 
 
 class FakeCache(dict):

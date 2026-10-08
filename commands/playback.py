@@ -50,7 +50,7 @@ def cmd_play(bot, user, text, command, parameter):
 
         elif bot.is_pause:
             bot.resume()
-        else:
+        elif var.playlist.current_item():
             bot.send_msg(var.playlist.current_item().format_current_playing(), text)
     else:
         bot.is_pause = False
@@ -90,8 +90,9 @@ def cmd_stop_and_getout(bot, user, text, command, parameter):
 
 
 def cmd_current_music(bot, user, text, command, parameter):
-    if len(var.playlist) > 0:
-        bot.send_msg(var.playlist.current_item().format_current_playing(), text)
+    current = var.playlist.current_item()  # 还没开始播(指针 -1)时没有当前曲
+    if current:
+        bot.send_msg(current.format_current_playing(), text)
     else:
         bot.send_msg(tr('not_playing'), text)
 
@@ -137,20 +138,7 @@ def cmd_remove(bot, user, text, command, parameter):
                                       item=removed.format_title()), text)
             log.info("cmd: delete from playlist: " + removed.format_debug_string())
 
-            var.playlist.remove(index)
-
-            if index < len(var.playlist):
-                if not bot.is_pause:
-                    bot.interrupt()
-                    var.playlist.current_index -= 1
-                    # then the bot will move to next item
-
-            else:  # if item deleted is the last item of the queue
-                var.playlist.current_index -= 1
-                if not bot.is_pause:
-                    bot.interrupt()
-        else:
-            var.playlist.remove(index)
+        bot.remove_from_queue(index)
 
     else:
         bot.send_msg(tr('bad_parameter', command=command), text)
@@ -184,10 +172,17 @@ def cmd_random(bot, user, text, command, parameter):
     var.playlist.randomize()
 
 
+# !repeat 一次最多插入几遍;以前没有上限,!repeat 999999999 会卡住命令线程并吃光内存
+MAX_REPEAT = 20
+
+
 def cmd_repeat(bot, user, text, command, parameter):
     repeat = 1
     if parameter and parameter.isdigit():
         repeat = int(parameter)
+    if not 1 <= repeat <= MAX_REPEAT:
+        bot.send_msg(tr('bad_parameter', command=command), text)
+        return
 
     music = var.playlist.current_item()
     if music:

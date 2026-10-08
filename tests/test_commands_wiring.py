@@ -16,9 +16,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def setup_module(module):
+    module._saved_config = var.config
     config = configparser.ConfigParser(interpolation=None, allow_no_value=True)
     config.read(os.path.join(ROOT, "configuration.default.ini"), encoding="utf-8")
     var.config = config
+
+
+def teardown_module(module):
+    var.config = module._saved_config
 
 
 class FakeBot:

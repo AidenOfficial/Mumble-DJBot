@@ -51,12 +51,15 @@ class BasePlaylist(list):
         self.log = logging.getLogger("bot")
         self.validating_thread_lock = threading.Lock()
         self.playlist_lock = threading.RLock()
+        # 删掉当前曲后指针已经落在"原来的下一首"上,下一次 next() 不再前进
+        self._stay_once = False
 
     def is_empty(self):
         return True if len(self) == 0 else False
 
     def from_list(self, _list, current_index):
         self.version += 1
+        self._stay_once = False
         super().clear()
         self.extend(_list)
         self.current_index = current_index
@@ -102,7 +105,10 @@ class BasePlaylist(list):
     def next(self):
         with self.playlist_lock:
             if len(self) == 0:
+                self._stay_once = False
                 return False
+            if self._take_stay():
+                return self[self.current_index]
 
             if self.current_index < len(self) - 1:
                 self.current_index += 1
@@ -110,9 +116,15 @@ class BasePlaylist(list):
             else:
                 return False
 
+    def _take_stay(self):
+        """消费 _stay_once:指针在队列范围内时这次 next() 原地不动。"""
+        stay, self._stay_once = self._stay_once, False
+        return stay and 0 <= self.current_index < len(self)
+
     def point_to(self, index):
         with self.playlist_lock:
             if -1 <= index < len(self):
+                self._stay_once = False
                 self.current_index = index
 
     def skip_current(self):
@@ -152,21 +164,47 @@ class BasePlaylist(list):
             var.cache.free(removed.id)
         return removed
 
-    def remove_by_id(self, id):
-        to_be_removed = []
-        for index, wrapper in enumerate(self):
-            if wrapper.id == id:
-                to_be_removed.append(index)
+    def remove_by_id(self, id, rewind=False):
+        """删掉队列里所有 id 相同的条目。
 
-        if to_be_removed:
+        删到当前曲时指针会落在"原来的下一首"上。rewind=True 表示调用方随后会
+        next()(主循环播放失败、正在播的歌被删),让那次 next() 原地不动,
+        正好落到原来的下一首,而不是跳过它。"""
+        with self.playlist_lock:
+            to_be_removed = [index for index, wrapper in enumerate(self) if wrapper.id == id]
+            if not to_be_removed:
+                return
             self.version += 1
+            removed_current = self.current_index in to_be_removed
 
-        for index in to_be_removed:
-            self.remove(index)
+            # 倒序删:先删后面的,前面的下标不会因此移位
+            for index in reversed(to_be_removed):
+                self.remove(index)
+
+            if removed_current and rewind:
+                self.rewind_after_removing_current()
+
+    def remove_current(self, rewind):
+        """删掉当前这一条(只删这一个位置,不管有没有重复)。rewind 含义同 remove_by_id。"""
+        with self.playlist_lock:
+            if not 0 <= self.current_index < len(self):
+                return None
+            removed = self.remove(self.current_index)
+            if rewind:
+                self.rewind_after_removing_current()
+            return removed
+
+    def rewind_after_removing_current(self):
+        # 删掉当前曲后指针已经指向原来的下一首(或越过队尾),让接下来那次
+        # next() 原地不动。不直接退指针:one-shot 下 -1 会被 current_item()
+        # 改回 0,next() 随后就把原来的下一首删了。
+        self._stay_once = True
 
     def current_item(self):
         with self.playlist_lock:
-            if len(self) == 0:
+            # 指针为 -1(还没开始 / 刚打乱)或越过队尾(删掉了最后一首)时没有当前曲。
+            # 以前会返回 self[-1](队尾那首)或抛 IndexError。
+            if not 0 <= self.current_index < len(self):
                 return False
 
             return self[self.current_index]
@@ -205,12 +243,14 @@ class BasePlaylist(list):
 
             # self.insert(0, current)
             self.current_index = -1
+            self._stay_once = False
             self.version += 1
 
     def clear(self):
         with self.playlist_lock:
             self.version += 1
             self.current_index = -1
+            self._stay_once = False
             super().clear()
 
         var.cache.free_all()
@@ -286,19 +326,26 @@ class BasePlaylist(list):
                 self.log.debug("playlist: validating failed.")
                 if var.bot:
                     var.bot.send_channel_msg(e.msg)
-                self.remove_by_id(item.id)
+                self._drop(item.id)
                 var.cache.free_and_delete(item.id)
                 continue
             except Exception:
                 # 任何意外错误只影响这一首,校验线程继续处理后面的
                 self.log.exception("playlist: unexpected error while validating %s", item.id)
-                self.remove_by_id(item.id)
+                self._drop(item.id)
                 continue
 
             if item.version > ver:
                 self.version += 1
 
         self.log.debug("playlist: validating finished.")
+
+    def _drop(self, item_id):
+        # 由 bot 决定删掉当前曲后指针怎么走(见 PlayerMixin.drop_from_queue)
+        if var.bot is not None and hasattr(var.bot, 'drop_from_queue'):
+            var.bot.drop_from_queue(item_id)
+        else:
+            self.remove_by_id(item_id)
 
 
 class OneshotPlaylist(BasePlaylist):
@@ -330,6 +377,12 @@ class OneshotPlaylist(BasePlaylist):
 
     def next(self):
         with self.playlist_lock:
+            if len(self) > 0 and self._take_stay():
+                # 当前曲已经被删掉了,队首就是原来的下一首,不能再删一次
+                self.version += 1
+                self.current_index = 0
+                return self[0]
+
             if len(self) > 0:
                 self.version += 1
 
@@ -367,6 +420,7 @@ class OneshotPlaylist(BasePlaylist):
     def point_to(self, index):
         with self.playlist_lock:
             self.version += 1
+            self._stay_once = False
             self.current_index = -1
             for i in range(index):
                 super().__delitem__(0)
@@ -380,7 +434,10 @@ class RepeatPlaylist(BasePlaylist):
     def next(self):
         with self.playlist_lock:
             if len(self) == 0:
+                self._stay_once = False
                 return False
+            if self._take_stay():
+                return self[self.current_index]
 
             if self.current_index < len(self) - 1:
                 self.current_index += 1
@@ -433,10 +490,15 @@ class SingleLoopPlaylist(BasePlaylist):
         with self.playlist_lock:
             if len(self) == 0:
                 self.current_index = -1
+                self._stay_once = False
                 return False
 
-            if self.current_index == -1:
+            if not 0 <= self.current_index < len(self):
+                # 还没开始,或者删掉了队尾那首:从头开始
                 self.current_index = 0
+                self._stay_once = False
+            elif self._take_stay():
+                pass  # 当前曲被删了,指针已经在原来的下一首上
             elif self._advance_once:
                 self.current_index = (self.current_index + 1) % len(self)
             self._advance_once = False
@@ -473,7 +535,10 @@ class RandomPlaylist(BasePlaylist):
     def next(self):
         with self.playlist_lock:
             if len(self) == 0:
+                self._stay_once = False
                 return False
+            if self._take_stay():
+                return self[self.current_index]
 
             if self.current_index < len(self) - 1:
                 self.current_index += 1

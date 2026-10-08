@@ -100,6 +100,12 @@ class URLItem(BaseItem):
             self.validating_lock.acquire()
             if self.ready in ['yes', 'validated']:
                 return True
+            if self.downloading:
+                # 正在下载(!repeat、重复点同一链接、切换播放模式都会再校验一次)。
+                # 下面那段会把带 .incomplete 标记的文件当成崩溃残留删掉,
+                # 而那正是边下边播正在写、ffmpeg 正在读的文件。
+                # (只看 downloading:库里残留的 'preparing' 是上次崩溃留下的,照常清理。)
+                return True
 
             # if self.ready == 'failed':
             #     self.validating_lock.release()
