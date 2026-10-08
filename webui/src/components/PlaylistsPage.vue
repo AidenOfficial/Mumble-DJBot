@@ -106,7 +106,7 @@ const importInto = ref<'new' | 'current'>('new')
 const importJob = ref<ImportJob | null>(null)
 const importError = ref('')
 const IMPORT_ERRORS: Record<string, string> = {
-  unsupported_source: 'Paste a YouTube playlist, NetEase Cloud Music playlist, or Spotify playlist/album link.',
+  unsupported_source: 'Paste a YouTube playlist, NetEase / QQ Music playlist, or Spotify playlist/album link.',
   spotify_not_configured: "Couldn't read that Spotify playlist — is it public?",
   list_failed: "Couldn't read that playlist — is it public?",
   no_entries: 'That playlist is empty (or private).',
@@ -252,7 +252,7 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
                     :disabled="importRunning || !importUrl.trim()">Import</button>
           </form>
           <p class="mt-2 leading-relaxed" :style="{ color: 'var(--c-text-faint)' }">
-            NetEase and Spotify songs are matched to YouTube by title, artist and length — NetEase audio is locked outside mainland China.
+            YouTube, NetEase, QQ Music and Spotify. Non-YouTube songs are matched to YouTube by title, artist and length — NetEase / QQ Music audio is locked outside mainland China.
           </p>
           <template v-if="importJob && importRunning">
             <p class="mt-2" :style="{ color: 'var(--c-text-muted)' }">{{ importProgress }}</p>

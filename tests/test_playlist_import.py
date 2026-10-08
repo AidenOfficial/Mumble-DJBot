@@ -99,9 +99,48 @@ class MatchTest(unittest.TestCase):
         # 中文标题不分词:"周杰倫晴天" 也要能命中
         self.assertIsNotNone(pi.score_candidate({'title': '晴天', 'artist': '周杰伦', 'duration': 269},
                                                 self.cand('周杰伦晴天MV', 'x', 270)))
-        # 简繁写法不同:时长几乎一致 + 歌手对得上时放行
-        self.assertIsNotNone(pi.score_candidate({'title': '灰色头像', 'artist': '許嵩', 'duration': 270},
-                                                self.cand('許嵩《灰色頭像》', 'x', 271)))
+        # 简体歌单 vs 繁体 YouTube 标题:统一转简体后比较
+        self.assertIsNotNone(pi.score_candidate({'title': '雅俗共赏', 'artist': '许嵩', 'duration': 249},
+                                                self.cand('許嵩 - 雅俗共賞【動態歌詞】', 'x', 250)))
+        # 同一歌手、同样时长的另一首歌不能放行
+        self.assertIsNone(pi.score_candidate({'title': '希望你过更好 (吉他版)', 'artist': '就是南方凯', 'duration': 188},
+                                             self.cand('就是南方凱 - 問心【動態歌詞】', 'x', 188)))
+
+    def test_snippets_need_the_same_artist(self):
+        snippet = {'title': '江海不渡你 (片段版)', 'artist': '烟(许佳豪)', 'duration': 18}
+        self.assertIsNone(pi.score_candidate(snippet, self.cand('江海不渡你 徐有根 【古風MV】', 'Music', 166)))
+        self.assertIsNotNone(pi.score_candidate(snippet, self.cand('煙(許佳豪) - 江海不渡你【動態歌詞】', 'x', 210)))
+        self.assertIsNone(pi.score_candidate({'title': '错把路灯当月光', 'artist': '是可乐鸭', 'duration': 16},
+                                             self.cand('是可乐鸭 错把路灯当月光 DJ串烧', 'x', 4083)))
+        # 纯符号歌名也要歌手对得上
+        self.assertIsNone(pi.score_candidate({'title': '❤', 'artist': '月光戦士', 'duration': 134},
+                                             self.cand('SAILORMOON COVER 月光伝', 'x', 130)))
+
+    def test_artist_aliases_and_short_titles(self):
+        self.assertIn('要不要买菜', pi._artists({'artist': '徐泽（要不要买菜）'}))
+        self.assertIn('樊凯杰', pi._artists({'artist': '隔壁老樊_樊凯杰'}))
+        self.assertIn('蜡笔小心', pi._artists({'artist': '蜡笔小心Carrie'}))
+        # 别名命中即可
+        self.assertIsNotNone(pi.score_candidate({'title': '卜卦', 'artist': '徐泽（要不要买菜）', 'duration': 165},
+                                                self.cand('要不要买菜 - 卜卦【动态歌词】', 'KK', 166)))
+        # 歌手对不上 + 歌名太短:拒绝
+        self.assertIsNone(pi.score_candidate({'title': '鸽子', 'artist': '一塊石頭', 'duration': 243},
+                                             self.cand('我为什么要买这只鸽子？', '农村达叔', 253)))
+        self.assertIsNone(pi.score_candidate({'title': 'Drive', 'artist': 'Biscuits/ItsNoah', 'duration': 194},
+                                             self.cand('Guy Fieri Eats a Chicken AND Biscuit Sandwich | Diners, Drive-Ins', 'Food Network', 196)))
+        # 英文按整词:'drive' 不命中 'drive-ins' 之外的词
+        self.assertFalse(pi._word_in('love', 'lovely day'))
+        self.assertTrue(pi._word_in('晴天', '周杰伦晴天mv'))
+
+    def test_traditional_query_retry(self):
+        queries = []
+
+        def search(q):
+            queries.append(q)
+            return [self.cand('名決 - 她是我的【動態歌詞】', '名決', 139, 'ok')] if '決' in q else []
+        link = pi.match_on_youtube({'title': '她是我的', 'artist': '名决', 'duration': 138}, search=search)
+        self.assertTrue(link.endswith('v=ok'))
+        self.assertEqual(queries, ['名决 她是我的', '名決 她是我的'])
 
     def test_search_failure_is_unmatched(self):
         def boom(q):

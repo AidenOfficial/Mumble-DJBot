@@ -629,7 +629,7 @@ def create_blueprint(requires_auth):
     @requires_auth
     def import_playlist():
         """Body: {url, playlist_id?(导入到已有歌单), name?(新歌单名,默认用来源标题)}
-        支持 YouTube 播放列表、网易云音乐歌单、Spotify 歌单/专辑。"""
+        支持 YouTube 播放列表、网易云音乐 / QQ 音乐歌单、Spotify 歌单/专辑。"""
         import playlist_import
 
         owner = _owner()

@@ -280,7 +280,7 @@ export const unbindMumble = () => send<Me>('DELETE', '/api/me/bind')
 export interface ImportJob {
   id: string
   status: 'listing' | 'matching' | 'done' | 'error'
-  source: 'youtube' | 'netease' | 'spotify'
+  source: 'youtube' | 'netease' | 'qqmusic' | 'spotify'
   total: number
   processed: number
   matched: number
