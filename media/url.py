@@ -207,8 +207,17 @@ class URLItem(BaseItem):
         # near the end of the file the margin cannot be satisfied anymore
         return downloaded_secs >= min(self.duration - 1, playhead + buffer_secs)
 
+    @staticmethod
+    def _enforce_cache_limit():
+        # 按 LRU 把缓存压到 tmp_folder_max_size 以内(不碰固定/队列中/下载中的条目)
+        try:
+            from bot import cache_store
+            cache_store.enforce_size_limit()
+        except Exception:
+            log.warning("url: cache size enforcement failed", exc_info=True)
+
     def _download(self):
-        util.clear_tmp_folder(var.tmp_folder, var.config.getint('bot', 'tmp_folder_max_size'))
+        self._enforce_cache_limit()
 
         self.downloading = True
         self.progress = 0.0
@@ -282,6 +291,7 @@ class URLItem(BaseItem):
                 self.downloading = False
                 self._read_thumbnail_from_file(base_path + ".jpg")
                 self.version += 1  # notify wrapper to save me
+                self._enforce_cache_limit()
                 return True
             else:
                 for f in glob.glob(base_path + "*"):

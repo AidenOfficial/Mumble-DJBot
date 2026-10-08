@@ -180,7 +180,12 @@ def main():
     if not var.music_folder.endswith(os.sep):
         # The file searching logic assumes that the music folder ends in a /
         var.music_folder = var.music_folder + os.sep
-    var.tmp_folder = util.solve_filepath(var.config.get('bot', 'tmp_folder'))
+    # BAM_TMP_FOLDER(Docker)优先:把下载缓存放进挂载卷,容器重建也不丢
+    var.tmp_folder = os.environ.get('BAM_TMP_FOLDER') or \
+        util.solve_filepath(var.config.get('bot', 'tmp_folder'))
+    if not var.tmp_folder.endswith(os.sep):
+        var.tmp_folder += os.sep  # URLItem 直接拼接 tmp_folder + id
+    os.makedirs(var.tmp_folder, exist_ok=True)
 
     # ======================
     #      Translation

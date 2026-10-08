@@ -7,14 +7,15 @@ import StatsPage from './components/StatsPage.vue'
 import LibraryPage from './components/LibraryPage.vue'
 import PlaylistsPage from './components/PlaylistsPage.vue'
 import UserChip from './components/UserChip.vue'
+import CachePage from './components/CachePage.vue'
 
 type Theme = 'light' | 'dark' | 'auto'
 const theme = ref<Theme>('auto')
 
-type View = 'home' | 'search' | 'library' | 'lists' | 'stats'
-const VIEWS: View[] = ['home', 'search', 'library', 'lists', 'stats']
+type View = 'home' | 'search' | 'library' | 'lists' | 'stats' | 'cache'
+const VIEWS: View[] = ['home', 'search', 'library', 'lists', 'stats', 'cache']
 const VIEW_LABEL: Record<View, string> = {
-  home: 'Now Playing', search: 'Search', library: 'Library', lists: 'Playlists', stats: 'Stats',
+  home: 'Now Playing', search: 'Search', library: 'Library', lists: 'Playlists', stats: 'Stats', cache: 'Cache',
 }
 const view = ref<View>('home')
 
@@ -98,6 +99,7 @@ onMounted(() => {
       <SearchPage v-else-if="view === 'search'" />
       <LibraryPage v-else-if="view === 'library'" />
       <PlaylistsPage v-else-if="view === 'lists'" />
+      <CachePage v-else-if="view === 'cache'" />
       <StatsPage v-else />
     </main>
   </div>

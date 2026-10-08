@@ -737,6 +737,14 @@ class PlayHistoryDatabase:
         conn.commit()
         conn.close()
 
+    def usage(self):
+        """{item_id: (播放次数, 最后播放时间)},缓存管理用来判断冷热。"""
+        conn = sqlite3.connect(self.db_path)
+        rows = conn.execute("SELECT item_id, COUNT(*), MAX(played_at) FROM play_history "
+                            "GROUP BY item_id").fetchall()
+        conn.close()
+        return {item_id: (count, last) for item_id, count, last in rows}
+
     def stats(self, top_n=10):
         """All aggregations for the stats page in one call."""
         conn = sqlite3.connect(self.db_path)

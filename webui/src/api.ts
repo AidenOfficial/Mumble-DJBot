@@ -163,3 +163,60 @@ export const playPlaylist = (
   id: number,
   body: { mode: 'append' | 'next' | 'replace'; shuffle?: boolean; item?: number },
 ) => send<BotStatus & { queued: number; skipped: number }>('POST', `/api/playlists/${id}/play`, body)
+
+// ---- 缓存管理 -----------------------------------------------------------
+
+export interface CacheEntry {
+  id: string
+  title: string
+  url: string
+  duration: number
+  size: number
+  files: number
+  complete: boolean
+  last_played: number
+  last_used: number
+  plays: number
+  pinned: boolean
+  frequent: boolean
+  in_queue: boolean
+  downloading: boolean
+}
+
+export interface CacheSummary {
+  folder: string
+  persistent: boolean
+  total_bytes: number
+  count: number
+  pinned_bytes: number
+  limit_bytes: number | null
+  disk_total: number
+  disk_free: number
+  auto_keep_plays: number
+  keep_days: number
+}
+
+export const fetchCache = () => getJson<{ summary: CacheSummary; entries: CacheEntry[] }>('/api/cache')
+export const pinCache = (id: string, pinned: boolean) =>
+  send<{ id: string; pinned: boolean }>('POST', '/api/cache/pin', { id, pinned })
+export async function deleteCache(id: string, force = false): Promise<number> {
+  const rv = await fetch(`${BASE}/api/cache/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, force }),
+  })
+  if (rv.status === 409) throw new Error('busy')
+  if (!rv.ok) throw new Error(String(rv.status))
+  return (await rv.json()).freed
+}
+export const cleanupCache = (mode: 'limit' | 'expired' | 'unpinned') =>
+  send<{ freed: number }>('POST', '/api/cache/cleanup', { mode })
+export const saveCacheToLibrary = (id: string) => send<{ path: string }>('POST', '/api/cache/save', { id })
+
+export function formatBytes(n: number): string {
+  if (!n) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)))
+  const v = n / 1024 ** i
+  return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`
+}
