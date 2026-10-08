@@ -6,12 +6,14 @@ if TYPE_CHECKING:
     import media.playlist
     import media.cache
     import database
+    import web_users
 
 bot: 'bot.core.MumbleBot' = None
 playlist: 'media.playlist.BasePlaylist' = None
 cache: 'media.cache.MusicCache' = None
 cleaner: 'bot.cleanup.CacheCleaner' = None
 play_history: 'database.PlayHistoryDatabase' = None
+user_db: 'web_users.UserDatabase' = None
 
 user = ""
 is_proxified = False

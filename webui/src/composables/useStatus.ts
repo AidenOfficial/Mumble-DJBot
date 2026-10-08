@@ -11,10 +11,12 @@ const clock = reactive({ playhead: 0 })
 
 let started = false
 let lastSync = 0 // performance.now() at the time of the last poll
+const syncedAt = ref(0) // 同上,给需要本地推算的组件(准备面板)用
 
 function applyStatus(s: BotStatus) {
   status.value = s
   lastSync = performance.now()
+  syncedAt.value = lastSync
   clock.playhead = s.playhead
   error.value = null
 }
@@ -29,7 +31,7 @@ async function poll() {
 
 function tick() {
   const s = status.value
-  if (s && s.play && !s.empty) {
+  if (s && s.play && !s.empty && !s.prep) {  // 还在准备(没出声)时进度不走
     const elapsed = (performance.now() - lastSync) / 1000
     const duration = s.current?.duration || 0
     const pos = s.playhead + elapsed
@@ -38,11 +40,21 @@ function tick() {
   requestAnimationFrame(tick)
 }
 
+// 等待开播 / 后台下载时每秒刷新,平时 3 秒一次
+function nextDelay() {
+  const s = status.value
+  return s?.prep || s?.current?.download ? 1000 : POLL_MS
+}
+
+async function pollLoop() {
+  await poll()
+  setTimeout(pollLoop, nextDelay())
+}
+
 function ensureStarted() {
   if (started) return
   started = true
-  poll()
-  setInterval(poll, POLL_MS)
+  pollLoop()
   requestAnimationFrame(tick)
 }
 
@@ -62,7 +74,7 @@ export function useStatus() {
     if (!duration) return 0
     return Math.min(1, clock.playhead / duration)
   })
-  return { status, error, clock, progress, refresh: poll, control, applyStatus }
+  return { status, error, clock, progress, syncedAt, refresh: poll, control, applyStatus }
 }
 
 export function formatTime(seconds: number): string {

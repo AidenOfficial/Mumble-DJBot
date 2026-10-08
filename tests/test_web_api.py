@@ -359,7 +359,7 @@ class WebApiTestCase(unittest.TestCase):
                 'source': 'youtube', 'url': 'https://www.youtube.com/watch?v=x'})
         self.assertEqual(200, rv.status_code)
         scrap.assert_called_once_with(
-            type='url', url='https://www.youtube.com/watch?v=x', user='Web Search')
+            type='url', url='https://www.youtube.com/watch?v=x', user='Remote Control')  # 无 Access 身份时的默认署名
         self.assertEqual('new1', var.playlist[-1].id)
 
     def test_search_add_bilibili_normalizes(self):

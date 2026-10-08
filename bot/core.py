@@ -18,16 +18,20 @@ import util
 import variables as var
 from constants import tr_cli as tr
 
+from .channels import ChannelMixin
 from .player import PlayerMixin
 
 
-class MumbleBot(PlayerMixin):
+class MumbleBot(PlayerMixin, ChannelMixin):
     version = 'git'
 
     def __init__(self, args):
         self.log = logging.getLogger("bot")
         self.log.info(f"bot: botamusique version {self.get_version()}, starting...")
         signal.signal(signal.SIGINT, self.ctrl_caught)
+        # docker stop / restart 发的是 SIGTERM:默认处理会直接杀进程,
+        # 队列来不及落盘。按 Ctrl-C 同样的路径优雅退出。
+        signal.signal(signal.SIGTERM, self.ctrl_caught)
         self.cmd_handle = {}
 
         self.stereo = var.config.getboolean('bot', 'stereo')
@@ -128,7 +132,12 @@ class MumbleBot(PlayerMixin):
         # CPU waste otherwise), and apply the current state to users that
         # appear later.
         self._receive_sound = False
+        # 每种回调只能挂一个 handler:统一在这里分发给声音接收、跟随、没人时暂停三块逻辑
+        self._init_follow()
+        self.bots = set()
         self.mumble.callbacks.user_created.set_handler(self._on_user_created)
+        self.mumble.callbacks.user_updated.set_handler(self._on_user_updated)
+        self.mumble.callbacks.user_removed.set_handler(self._on_user_removed)
 
         self.mumble.set_codec_profile("audio")
         self.mumble.start()  # start the mumble thread
@@ -146,8 +155,10 @@ class MumbleBot(PlayerMixin):
         self.mumble.set_bandwidth(self.bandwidth)
 
         bots = var.config.get("bot", "when_nobody_in_channel_ignore",fallback="")
-        self.bots = set(bots.split(','))
+        self.bots = set(b.strip() for b in bots.split(',') if b.strip())
         self._user_in_channel = self.get_user_count_in_channel()
+        # 默认频道可能本来就没人:连上后按跟随设置检查一次
+        self.schedule_follow_check(delay=5)
 
 
         # ====== Volume ======
@@ -188,12 +199,8 @@ class MumbleBot(PlayerMixin):
         assert var.config.get("bot", "when_nobody_in_channel") in ['pause', 'pause_resume', 'stop', 'nothing', ''], \
             "Unknown action for when_nobody_in_channel"
 
-        if var.config.get("bot", "when_nobody_in_channel") in ['pause', 'pause_resume', 'stop']:
-            user_change_callback = \
-                lambda user, action: threading.Thread(target=self.users_changed,
-                                                      args=(user, action), daemon=True).start()
-            self.mumble.callbacks.user_removed.set_handler(user_change_callback)
-            self.mumble.callbacks.user_updated.set_handler(user_change_callback)
+        self._react_to_empty_channel = \
+            var.config.get("bot", "when_nobody_in_channel") in ['pause', 'pause_resume', 'stop']
 
         # Debug use
         self._loop_status = 'Idle'
@@ -281,13 +288,21 @@ class MumbleBot(PlayerMixin):
     def _on_user_created(self, user):
         if user.sound:
             user.sound.set_receive_sound(self._receive_sound)
+        self._note_user_event(user, 'created')
 
-    def join_channel(self):
-        if self.channel:
-            if '/' in self.channel:
-                self.mumble.channels.find_by_tree(self.channel.split('/')).move_in()
-            else:
-                self.mumble.channels.find_by_name(self.channel).move_in()
+    def _on_user_updated(self, user, actions):
+        if 'channel_id' not in (actions or {}) and 'session' not in (actions or {}):
+            return  # 只关心换频道(静音、评论之类的更新忽略)
+        self._note_user_event(user, 'updated')
+        self._dispatch_users_changed(user, actions)
+
+    def _on_user_removed(self, user, message):
+        self._note_user_event(user, 'removed')
+        self._dispatch_users_changed(user, message)
+
+    def _dispatch_users_changed(self, user, action):
+        if getattr(self, '_react_to_empty_channel', False):
+            threading.Thread(target=self.users_changed, args=(user, action), daemon=True).start()
 
     # =======================
     #         Message
@@ -295,6 +310,14 @@ class MumbleBot(PlayerMixin):
 
     # All text send to the chat is analysed by this function
     def message_received(self, text):
+        # 运行在 pymumble 的回调线程里:任何异常(例如发送者刚好下线导致
+        # users[actor] KeyError)都不能冒泡出去拖垮连接线程。
+        try:
+            self._handle_message(text)
+        except Exception:
+            self.log.exception("bot: failed to handle a text message")
+
+    def _handle_message(self, text):
         raw_message = text.message.strip()
         message = re.sub(r'<.*?>', '', raw_message)
         if text.actor == 0:
@@ -383,15 +406,23 @@ class MumbleBot(PlayerMixin):
                 self.log.error(f"bot: command {command_exc} failed with error: {error_traceback}\n")
                 self.send_msg(tr('error_executing_command', command=command_exc, error=error), text)
 
+    # 发消息从不抛异常:它被下载线程、进度播报、校验线程等到处调用,
+    # 断线重连期间 users/channels 查找会 KeyError,不能因此弄死调用方。
     def send_msg(self, msg, text):
-        msg = msg.encode('utf-8', 'ignore').decode('utf-8')
-        # text if the object message, contain information if direct message or channel message
-        self.mumble.users[text.actor].send_text_message(msg)
+        try:
+            msg = msg.encode('utf-8', 'ignore').decode('utf-8')
+            # text if the object message, contain information if direct message or channel message
+            self.mumble.users[text.actor].send_text_message(msg)
+        except Exception:
+            self.log.warning("bot: could not send private message", exc_info=True)
 
     def send_channel_msg(self, msg):
-        msg = msg.encode('utf-8', 'ignore').decode('utf-8')
-        own_channel = self.mumble.channels[self.mumble.users.myself.channel_id]
-        own_channel.send_text_message(msg)
+        try:
+            msg = msg.encode('utf-8', 'ignore').decode('utf-8')
+            own_channel = self.mumble.channels[self.mumble.users.myself.channel_id]
+            own_channel.send_text_message(msg)
+        except Exception:
+            self.log.warning("bot: could not send channel message", exc_info=True)
 
     @staticmethod
     def is_admin(user):
@@ -420,6 +451,12 @@ class MumbleBot(PlayerMixin):
 
 
     def users_changed(self, user, message):
+        try:
+            self._users_changed()
+        except Exception:
+            self.log.exception("bot: error while reacting to a channel user change")
+
+    def _users_changed(self):
         # only check if there is one more user currently in the channel
         # else when the music is paused and somebody joins, music would start playing again
         user_count = self.get_user_count_in_channel()
@@ -431,7 +468,10 @@ class MumbleBot(PlayerMixin):
                 self.send_channel_msg(tr("auto_paused"))
         elif user_count == 1 and len(var.playlist) != 0:
             # if the bot is the only user left in the channel and the playlist isn't empty
-            if var.config.get("bot", "when_nobody_in_channel") == "stop":
+            if self.follow_would_move():
+                # 跟随模式马上会带 bot 去有人的频道,继续放,别暂停/清空
+                self.log.info('bot: No user in my channel, following users instead of pausing.')
+            elif var.config.get("bot", "when_nobody_in_channel") == "stop":
                 self.log.info('bot: No user in my channel. Stop music now.')
                 self.clear()
             else:

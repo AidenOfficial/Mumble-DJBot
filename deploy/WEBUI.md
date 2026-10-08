@@ -53,9 +53,111 @@ docker compose logs -f cloudflared               # 看到 "Registered tunnel con
    策略按邮箱/组放行;Session 时长按需(如 24h)。
 3. (可选)Access → Service Auth 为自动化脚本发 Service Token。
 
+## 用户身份、别名与个人歌单
+
+Cloudflare Access 回源时会带上登录者邮箱(`Cf-Access-Authenticated-User-Email`),
+Web UI 据此识别"是谁":
+
+- 右上角头像 → 设置**别名**(显示名)。在 Web 上点的歌,Mumble 里和统计页都显示别名;
+  不设则用邮箱 @ 前面的部分。别名全站唯一(不分大小写),不能含 `< > & "`。
+- **Playlists** 页:每个人自己的歌单。任意页面歌曲旁的 ♡ 可加入歌单,也可以把当前
+  整个队列存成歌单;歌单可"立即播放 / 随机 / 追加到队列 / 单曲插播"。
+- 没有经过 Access(例如局域网直连 8181)时是"Guest":能点歌,没有歌单。
+
+**可选加固:校验 Access JWT。** 只读请求头的前提是 8181 不对外暴露(只能经 Tunnel 访问)。
+想彻底防伪造,在 `configuration.ini` 加:
+
+```ini
+[webinterface]
+access_team_domain = <你的团队名>.cloudflareaccess.com
+access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
+```
+
+开启后每个请求都校验 `Cf-Access-Jwt-Assertion`,没有合法 JWT 的一律 403
+(局域网直连也会被拒,这是预期行为)。
+
+## 频道与跟随(Settings 页)
+
+- 实时显示服务器的频道树和每个频道里的人(bot 自己高亮,其他 bot 置灰)。
+- **☆ Default**:设为默认频道,启动和 `!oust` 时回到这里;优先于 `[server] channel`。
+- **Move here**:让 bot 立刻过去。
+- 跟随模式:
+  - *Stay put*:不动(默认)。
+  - *Follow the crowd*:bot 所在频道没人了(只剩 bot / `when_nobody_in_channel_ignore` 里的 bot),
+    就去最后离开的那个人去的频道;那人下线了就去人最多的频道。
+  - *Follow someone*:始终跟着指定的人;对方离线时按 *Follow the crowd* 处理。
+  - 可选"服务器上一个人都没有时回默认频道"。
+- 有人换频道后等 2.5 秒再决定,来回切频道不会把 bot 带着乱跑。
+- 开着跟随时,`when_nobody_in_channel = pause/stop` 不会在 bot 即将跟过去时误暂停/清空队列。
+- bot 需要有进入目标频道的权限(Mumble ACL),没权限的频道服务器会拒绝移动。
+
+## 没人时自动暂停(Settings 页)
+
+- bot 所在频道连续没人(其他 bot 不算)达到设定分钟数就暂停,默认 5 分钟,0 = 关闭。
+- 默认有人回到频道就自动继续;只恢复它自己暂停的,不会替人恢复手动暂停。
+- 开着跟随模式时优先跟过去,不会暂停。
+- 与 ini 里的 `when_nobody_in_channel`(立即暂停/停止)相互独立,一般保持那个为 `nothing` 即可。
+
+## 长视频开播与等待进度
+
+- 点歌后 Now Playing 显示准备面板:当前阶段(读取视频信息 → 连接 → 缓冲 → 播放)、
+  已等待时间、预计还要几秒开播、下载速度。读取信息阶段没有速度数据,按最近几次的耗时估算。
+- 开播后如果还在后台下载,进度条上浅色部分是已下载的位置,下方显示下载进度和剩余时间;
+  队列里正在预下载的歌显示下载百分比。
+- Mumble 里只有在大家真的在等(当前曲还没出声)超过 6 秒时才播报一次在等什么、还要多久;
+  后台预下载、已经边下边播的都不再刷屏。
+- 实测(B 站 50 分钟视频,2026-10-08):点歌到出声 9.7 秒 → 5.6–6.0 秒。剩下的主要是
+  yt-dlp 读取视频信息(B 站约 4.5 秒,会请求网页/合集/签名/格式/章节好几个接口)。
+  放过的歌在缓存里,秒开;排在后面的歌在前一首播放时已经预下载好。
+
+## 跳过非音乐片段(SponsorBlock)
+
+- YouTube / B 站视频播放时自动跳过社区标注的片段:MV 片头片尾的说话、赞助口播、求三连等。
+- Now Playing 的进度条上用斜纹标出会被跳过的位置。
+- 配置见 `configuration.example.ini` 的 `sponsorblock` / `sponsorblock_categories`。
+- B 站多 P 视频的片段对应不到具体是哪一 P,这种情况不跳。
+
+## 导入歌单(Playlists 页 → Import a playlist)
+
+- 支持 YouTube 播放列表、网易云音乐 / QQ 音乐歌单、Spotify 歌单/专辑,可以导入成新歌单或追加到当前歌单。
+  QQ 音乐的分享链接(i2.y.qq.com/...playlist.html?id=)、网页版链接和 c6.y.qq.com 短链都可以。
+- 网易云 / QQ 音乐在海外基本没有音源,Spotify 本身不提供音频,所以这几个只读歌名/歌手/时长,
+  再去 YouTube 按"时长接近 + 官方频道优先 + 排除翻唱/现场/AMV"挑最像的一个。
+  找不到的会列出来。导入几百首大约要一两分钟,页面上有进度。
+- Spotify 歌单 100 首以内不需要任何凭据(读公开嵌入页);超过 100 首时,配置了
+  `[spotify] client_id / client_secret`(和 `!spotify` 命令同一套)才能读完整列表,否则只导入前 100 首。
+- 实测(2026-10-08):网易云 262/265、Spotify 78/79、YouTube 9/9、QQ 音乐 270/398;
+  每 100 首匹配约 30–40 秒。QQ 那个歌单以抖音/独立音乐人的中文歌和片段版为主,
+  很多在 YouTube 上本来就没有,没匹配上的会列出来。
+- 简体歌单会同时用简体和繁体搜索、比较时统一转简体(YouTube 上中文歌多为繁体标题)。
+
+## 绑定 Mumble 账号
+
+- 网页右上角头像 → **Link Mumble account**,生成 6 位绑定码(10 分钟有效),
+  在 Mumble 里私聊 bot 发 `!bind 123456`。
+- 绑定后在聊天里:
+  - `!mylist`:列出我的歌单;
+  - `!mylist 名字或序号 [shuffle]`:把歌单加入播放队列;
+  - `!fav [歌单名]`:把当前这首加入歌单(默认 Favorites,没有就自动建);
+  - `!unbind`:解除绑定。
+- 还没设别名的话,绑定时自动用 Mumble 名当别名;统计页会把同一个人在聊天和网页上的点歌合并成一行。
+- Mumble 账号的识别优先级:服务器注册用户 ID > 客户端证书指纹 > 用户名。
+  没注册的用户换了客户端证书就需要重新绑定。
+- 绑定码输错 5 次锁 10 分钟。
+
+## 缓存与上传
+
+- **Cache** 页:下载缓存占用、每首的大小/播放次数/最后使用时间。📌 固定 = 自动清理永不删除;
+  💾 = 复制进本地曲库(`music_folder/saved/`);超过 `tmp_folder_max_size`(默认 4GB)时
+  按"最久没用"淘汰,播放 ≥3 次的歌最后才淘汰。
+- **上传**(Library 页 Upload):分片上传(每片 32MB),不受 Cloudflare 单请求 100MB 限制,
+  断网会自动续传;单文件上限 `max_upload_file_size`(默认 4G)。视频默认只保留音轨
+  (`upload_extract_audio`),上传完直接进曲库,不用 rescan。
+
 ## 验证清单(部署后手动)
 
 - [ ] 域名打开即新 UI,`/legacy` 是旧界面,未登录时被 Access 拦截。
 - [ ] 直连 NAS IP:8181 从公网不可达(仅 Tunnel 出站)。
 - [ ] `/api/status` 轮询正常、控件/队列/搜索/统计各页可用。
-- [ ] 上传大小上限 `max_upload_file_size` 符合预期。
+- [ ] 上传大小上限 `max_upload_file_size` 符合预期;上传一个 >100MB 的视频能成功并只剩音轨。
+- [ ] 右上角显示的是自己的 Access 邮箱;设置别名后点一首歌,Mumble 里显示别名。

@@ -14,6 +14,7 @@ import media.playlist
 import util
 import variables as var
 from database import SettingsDatabase, MusicDatabase, DatabaseMigration, PlayHistoryDatabase
+from web_users import UserDatabase
 from media.cache import MusicCache
 
 from .cleanup import CacheCleaner
@@ -171,11 +172,20 @@ def main():
     # database (own table, created on first use).
     var.play_history = PlayHistoryDatabase(var.music_db.db_path)
 
+    # Web 用户(Access 邮箱 → 别名)与个人歌单。放 settings 库:它总在磁盘上,
+    # 而 save_music_library=False 时 music_db 是 :memory:。
+    var.user_db = UserDatabase(var.settings_db_path)
+
     var.music_folder = util.solve_filepath(var.config.get('bot', 'music_folder'))
     if not var.music_folder.endswith(os.sep):
         # The file searching logic assumes that the music folder ends in a /
         var.music_folder = var.music_folder + os.sep
-    var.tmp_folder = util.solve_filepath(var.config.get('bot', 'tmp_folder'))
+    # BAM_TMP_FOLDER(Docker)优先:把下载缓存放进挂载卷,容器重建也不丢
+    var.tmp_folder = os.environ.get('BAM_TMP_FOLDER') or \
+        util.solve_filepath(var.config.get('bot', 'tmp_folder'))
+    if not var.tmp_folder.endswith(os.sep):
+        var.tmp_folder += os.sep  # URLItem 直接拼接 tmp_folder + id
+    os.makedirs(var.tmp_folder, exist_ok=True)
 
     # ======================
     #      Translation
@@ -246,19 +256,24 @@ def main():
     # ============================
     #   Crash safety / watchdog
     # ============================
-    # In Python an unhandled exception in a worker thread silently kills only
-    # that thread, leaving a half-dead "zombie" bot that no restart policy can
-    # detect. Turn such failures into a loud process exit so the supervisor
-    # (systemd / Docker restart policy) can bring a fresh bot back.
+    # 未捕获的线程异常:以前一律 os._exit(1),结果下载/校验/进度播报这类
+    # 一次性工作线程的任何小错误(yt-dlp 返回 None 时长、发消息时恰好断线……)
+    # 都会把整个 bot 带走,这正是线上反复"崩溃重启"的主因。
+    # 现在只记录日志;只有 Web 服务线程死掉才退出进程让 Docker 拉起
+    # (Mumble 线程断开时主循环自己会退出,不需要这里兜底)。
+    fatal_threads = {"WebThread"}
     if hasattr(threading, "excepthook"):
         def _thread_excepthook(args):
             if args.exc_type is SystemExit:
                 return
+            name = args.thread.name if args.thread else "?"
+            fatal = name in fatal_threads
             bot_logger.critical(
-                "bot: unhandled exception in thread %s, exiting for restart",
-                args.thread.name if args.thread else "?",
+                "bot: unhandled exception in thread %s%s", name,
+                ", exiting for restart" if fatal else " (thread dropped, bot keeps running)",
                 exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
-            os._exit(1)
+            if fatal:
+                os._exit(1)
         threading.excepthook = _thread_excepthook
 
     # Watchdog: if the main playback loop stops making progress (e.g. a stuck

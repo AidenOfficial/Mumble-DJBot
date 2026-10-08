@@ -8,6 +8,7 @@ import time
 
 import variables as var
 from constants import tr_cli as tr
+from media import sponsorblock
 from media.item import ValidationFailedError, PreparationFailedError
 
 
@@ -66,6 +67,71 @@ class PlayerMixin:
     # =======================
     #   Launch and Download
     # =======================
+
+    # =======================
+    #   SponsorBlock
+    # =======================
+
+    def _sponsorblock_categories(self):
+        if not var.config.getboolean('bot', 'sponsorblock', fallback=False):
+            return []
+        raw = var.config.get('bot', 'sponsorblock_categories', fallback='music_offtopic')
+        return [c.strip() for c in raw.split(',') if c.strip()]
+
+    def _sponsorblock_prefetch(self, wrapper):
+        """后台查询这首歌要跳过的片段(结果按条目 id 缓存,重播/续播复用)。"""
+        categories = self._sponsorblock_categories()
+        if not categories:
+            return
+        if not hasattr(self, '_sb_segments'):
+            self._sb_segments = {}
+        try:
+            item = wrapper.item() if hasattr(wrapper, 'item') else wrapper
+            url = getattr(item, 'url', '')
+            item_id = item.id
+        except Exception:
+            return
+        if getattr(item, 'type', '') not in ('url', 'url_from_playlist') or not url:
+            return
+        if item_id in self._sb_segments:
+            return
+        self._sb_segments[item_id] = None  # 查询中
+
+        def run():
+            self._sb_segments[item_id] = sponsorblock.fetch_segments(url, categories)
+
+        threading.Thread(target=run, name="SponsorBlock-" + item_id[:7], daemon=True).start()
+
+    def skip_segments_for(self, item_id):
+        return (getattr(self, '_sb_segments', {}) or {}).get(item_id) or []
+
+    def _sponsorblock_skip(self):
+        """当前播放位置落在要跳过的片段里:杀掉 ffmpeg,从片段结尾静默重启;
+        片段一直到曲尾的话直接切下一首。返回 True 表示这一轮已处理。"""
+        segments = self.skip_segments_for(getattr(self, '_playing_id', None))
+        if not segments:
+            return False
+        hit = sponsorblock.segment_at(segments, self.playhead)
+        if not hit:
+            return False
+        start, end = hit
+        try:
+            self.thread.kill()
+        except Exception:
+            pass
+        self.thread = None
+        self.read_pcm_size = 0
+        duration = getattr(self, '_playing_duration', 0) or 0
+        if duration and end >= duration - 1.5:
+            self.log.info("bot: sponsorblock skipped %.0fs-end, moving on", start)
+            self.wait_for_ready = False  # 下一轮主循环会切到下一首
+        else:
+            self.log.info("bot: sponsorblock skipped %.0fs-%.0fs", start, end)
+            self.playhead = end
+            self.song_start_at = -1
+            self.wait_for_ready = True
+            self._quiet_relaunch = True
+        return True
 
     def _stream_enabled(self):
         return var.config.getboolean('bot', 'stream_while_downloading', fallback=False)
@@ -144,6 +210,15 @@ class PlayerMixin:
         uri = music_wrapper.uri()
 
         self.log.info("bot: play music " + music_wrapper.format_debug_string())
+        self._playing_id = getattr(music_wrapper, 'id', None)
+        try:
+            self._playing_duration = getattr(music_wrapper.item(), 'duration', 0) or 0
+        except Exception:
+            self._playing_duration = 0
+        self._sponsorblock_prefetch(music_wrapper)
+        # 跳过 SponsorBlock 片段时的重启不算新的一首:不播报、不计入统计
+        quiet = getattr(self, '_quiet_relaunch', False)
+        self._quiet_relaunch = False
 
         # Statistics: one history row per playback start (a start_from > 0
         # is a resume or a stream-while-downloading relaunch, not a play;
@@ -160,7 +235,7 @@ class PlayerMixin:
             except Exception:
                 self.log.debug("bot: could not record play history", exc_info=True)
 
-        if var.config.getboolean('bot', 'announce_current_music'):
+        if var.config.getboolean('bot', 'announce_current_music') and not quiet:
             self.send_channel_msg(music_wrapper.format_current_playing())
 
         if var.config.getboolean('debug', 'ffmpeg'):
@@ -171,12 +246,32 @@ class PlayerMixin:
         channels = 2 if self.stereo else 1
         self.pcm_buffer_size = 960 * channels
 
-        command = ["ffmpeg", '-v', ffmpeg_debug, '-nostdin', '-i', uri, '-ss', f"{start_from:f}",
-                   # Decode audio only. Without this, ffmpeg may try to handle a
-                   # video / cover-art stream from a container (mp4/mkv, or a
-                   # YouTube/Bilibili "best" format) and fail to produce PCM -
-                   # which used to take playback (and sometimes the bot) down.
-                   '-vn', '-map', '0:a:0?']
+        command = ["ffmpeg", '-v', ffmpeg_debug, '-nostdin']
+        if str(uri).lower().startswith(('http://', 'https://')):
+            # 网络流(电台/直播):卡住时让 ffmpeg 自己超时退出、自动重连,
+            # 而不是让主循环永远阻塞在 stdout.read 上,最后被看门狗判死重启。
+            command += ['-reconnect', '1', '-reconnect_streamed', '1',
+                        '-reconnect_delay_max', '10', '-rw_timeout', '30000000']
+        seek = start_from
+        try:
+            if getattr(music_wrapper.item(), 'type', '') in ('radio', 'livestream'):
+                # 直播/电台不能 seek:暂停后恢复时 playhead 可能已经很大,旧的输出端
+                # -ss 会实时解码这么多秒的直播音频,主循环同样被卡到看门狗超时
+                seek = 0
+        except Exception:
+            pass
+        if seek > 0:
+            # 输入端 seek(-ss 放在 -i 之前):由解复用器直接跳转。
+            # 以前 -ss 放在 -i 之后,ffmpeg 要把前面的音频全部解码 + loudnorm
+            # 再丢掉;长视频恢复播放/拖动进度到 2 小时处要卡几十秒到几分钟,
+            # 主循环阻塞超过 watchdog_timeout 就被判定卡死,整个进程退出。
+            command += ['-ss', f"{seek:f}"]
+        command += ['-i', uri,
+                    # Decode audio only. Without this, ffmpeg may try to handle a
+                    # video / cover-art stream from a container (mp4/mkv, or a
+                    # YouTube/Bilibili "best" format) and fail to produce PCM -
+                    # which used to take playback (and sometimes the bot) down.
+                    '-vn', '-map', '0:a:0?']
 
         # Loudness normalization (EBU R128): keeps loud and quiet tracks at a
         # consistent volume so the bot can serve as background music without
@@ -287,6 +382,7 @@ class PlayerMixin:
         return th
 
     def start_download(self, item):
+        self._wait_started = time.time()  # "已经等了多久"从这里算
         if not item.is_ready():
             self.log.info("bot: current music isn't ready, start downloading.")
             self.async_download(item)
@@ -298,12 +394,20 @@ class PlayerMixin:
             ver = item.version
             try:
                 item.validate()
+                self._sponsorblock_prefetch(item)
                 if item.is_ready():
                     return True
             except ValidationFailedError as e:
                 self.send_channel_msg(e.msg)
                 var.playlist.remove_by_id(item.id)
                 var.cache.free_and_delete(item.id)
+                return False
+            except Exception:
+                # yt-dlp / 网站返回的意外数据(时长为 None 等)只算这一首失败,
+                # 不能让下载线程带着异常死掉。
+                self.log.exception("bot: unexpected error while validating %s", item.id)
+                self.send_channel_msg(tr('unable_download', item=self._safe_title(item)))
+                var.playlist.remove_by_id(item.id)
                 return False
 
             try:
@@ -314,16 +418,98 @@ class PlayerMixin:
             except PreparationFailedError as e:
                 self.send_channel_msg(e.msg)
                 return False
+            except Exception:
+                self.log.exception("bot: unexpected error while downloading %s", item.id)
+                self.send_channel_msg(tr('unable_download', item=self._safe_title(item)))
+                try:
+                    item.item().ready = 'failed'
+                except Exception:
+                    pass
+                return False
         finally:
             with self._download_lock:
                 self._active_downloads.discard(item.id)
 
+    @staticmethod
+    def _safe_title(wrapper):
+        try:
+            return wrapper.format_title()
+        except Exception:
+            return getattr(wrapper, 'id', '?')
+
     def _download_progress_reporter(self, wrapper):
+        try:
+            self._report_download_progress(wrapper)
+        except Exception:
+            self.log.debug("bot: download progress reporter failed", exc_info=True)
+
+    # =======================
+    #   准备进度(Web 可视化 / 聊天播报)
+    # =======================
+
+    def is_waiting_for(self, item_id):
+        """bot 正在等这首歌准备好(还没出声)。"""
+        if self.is_pause or not self.wait_for_ready or len(var.playlist) == 0:
+            return False
+        current = var.playlist.current_item()
+        return bool(current) and current.id == item_id
+
+    def prep_status(self, wrapper):
+        """当前曲的准备进度:阶段、已等待秒数、下载速度、缓冲进度、预计几秒后开始播放。"""
+        try:
+            item = wrapper.item()
+        except Exception:
+            return None
+        now = time.time()
+        stage = getattr(item, 'stage', None)
+        if stage is None:  # 本地文件 / 电台:没有下载阶段
+            stage = 'ready' if wrapper.is_ready() else 'starting'
+        if stage in ('ready',) and self.wait_for_ready:
+            stage = 'launching'  # 文件已就绪,马上开始解码
+        duration = getattr(item, 'duration', 0) or 0
+        buffer_secs = var.config.getint('bot', 'stream_buffer_seconds', fallback=30)
+        min_duration = var.config.getint('bot', 'stream_min_duration', fallback=300)
+        can_stream = (self._stream_enabled() and duration >= min_duration
+                      and not getattr(item, 'no_stream', False))
+        target_secs = min(duration - 1, self.playhead + buffer_secs) if can_stream and duration else duration
+        eta_fn = getattr(item, 'eta_to_playable', None)
+        eta = eta_fn(self.playhead, buffer_secs, can_stream) if eta_fn else None
+        estimated = False
+        if eta is None and hasattr(item, 'eta_estimate'):
+            eta, estimated = item.eta_estimate(), True  # 没有速度数据时按近期典型耗时估
+        progress = getattr(item, 'progress', 0.0) or 0.0
+        return {
+            'stage': stage,
+            'elapsed': round(now - getattr(self, '_wait_started', now), 1),
+            'stage_elapsed': round(now - getattr(item, 'stage_since', now), 1),
+            'eta': None if eta is None else round(eta, 1),
+            'eta_estimated': estimated,
+            'speed': round(getattr(item, 'speed', 0.0) or 0.0),
+            'downloaded': getattr(item, 'downloaded_bytes', 0) or 0,
+            'total': getattr(item, 'total_bytes', 0) or 0,
+            'progress': round(progress, 4),
+            'streaming': bool(can_stream),
+            'buffered_secs': round(progress * duration, 1) if duration else 0,
+            'target_secs': round(max(target_secs, 0), 1),
+        }
+
+    def _prep_detail(self, wrapper):
+        prep = self.prep_status(wrapper) or {}
+        stage, eta = prep.get('stage'), prep.get('eta')
+        if stage == 'fetching_info':
+            return tr('prep_fetching')
+        if stage in ('starting', 'pending'):
+            return tr('prep_connecting')
+        if eta is not None:
+            return tr('prep_buffering_eta', eta=max(1, int(round(eta))))
+        return tr('prep_buffering')
+
+    def _report_download_progress(self, wrapper):
         # Announce download progress in chat, but only for downloads slow
         # enough to matter (e.g. a multi-hour video). Short downloads finish
         # within the grace period and produce no messages at all.
         grace = 25          # seconds of silence before the first message
-        poll = 4
+        poll = 2
         min_gap = 20        # minimum seconds between progress messages
         max_wait = 7200     # safety cap
 
@@ -337,8 +523,10 @@ class PlayerMixin:
 
         reported_any = False
         announced_unknown = False
+        announced_wait = False
         last_msg_time = 0.0
         next_milestone = 0.25
+        wait_notice_after = 6  # 有人在等、6 秒还没开始放,就说一下在等什么、还要多久
 
         while not self.exit and time.time() - start < max_wait:
             try:
@@ -348,11 +536,19 @@ class PlayerMixin:
                 break
 
             now = time.time()
-            if now - start >= grace and getattr(item, 'downloading', False):
+            # 只在 bot 真的在等这首时才播报:后台预下载、边下边播已经在放的,都不刷屏
+            waiting = self.is_waiting_for(wrapper.id)
+            if waiting and not announced_wait and now - start >= wait_notice_after:
+                title = getattr(item, 'title', '') or getattr(item, 'url', '') or '...'
+                self.send_channel_msg(tr('download_waiting', item=title, detail=self._prep_detail(wrapper)))
+                announced_wait = True
+                last_msg_time = now
+            if waiting and now - start >= grace and getattr(item, 'downloading', False):
                 progress = getattr(item, 'progress', 0.0) or 0.0
                 title = getattr(item, 'title', '') or getattr(item, 'url', '') or '...'
                 if progress <= 0.0:
-                    if not announced_unknown and now - last_msg_time >= min_gap:
+                    # 已经说过"在等什么、还要多久"就不再重复"开始下载"
+                    if not announced_unknown and not announced_wait and now - last_msg_time >= min_gap:
                         self.send_channel_msg(tr('download_progress_start', item=title))
                         announced_unknown = True
                         reported_any = True
@@ -384,6 +580,13 @@ class PlayerMixin:
         while not self.exit and self.mumble.is_alive():
             self.last_loop_at = time.time()
             self._write_heartbeat()
+            self._autosave_playlist()
+            try:
+                idle_tick = getattr(self, 'idle_tick', None)
+                if idle_tick:
+                    idle_tick()
+            except Exception:
+                self.log.debug("bot: idle check failed", exc_info=True)
             try:
                 self._loop_iteration()
             except Exception:
@@ -415,6 +618,24 @@ class PlayerMixin:
                 self.log.info("bot: save playlist into database")
                 var.playlist.save()
 
+    def _autosave_playlist(self):
+        # 队列以前只在正常退出时保存:一旦崩溃/被看门狗重启,整条队列就丢了。
+        # 现在队列有变化就每 15 秒落盘一次(写几行 sqlite,开销可忽略)。
+        now = time.time()
+        if now - getattr(self, '_last_playlist_save', 0.0) < 15:
+            return
+        self._last_playlist_save = now
+        if not var.config.getboolean('bot', 'save_playlist', fallback=True):
+            return
+        version = (id(var.playlist), var.playlist.version, var.playlist.current_index)
+        if version == getattr(self, '_saved_playlist_version', None):
+            return
+        try:
+            var.playlist.save()
+            self._saved_playlist_version = version
+        except Exception:
+            self.log.debug("bot: playlist autosave failed", exc_info=True)
+
     def _write_heartbeat(self):
         # Touch a heartbeat file every few seconds so an external healthcheck
         # (e.g. Docker) can confirm the main loop is still alive.
@@ -442,6 +663,9 @@ class PlayerMixin:
             if self.song_start_at == -1:
                 self.song_start_at = time.time() - self.playhead
             self.playhead = time.time() - self.song_start_at
+
+            if not self.on_interrupting and self._sponsorblock_skip():
+                return
 
             raw_music = self.thread.stdout.read(self.pcm_buffer_size)
             # Capture whether this is the very first chunk of the song *before*
@@ -530,6 +754,7 @@ class PlayerMixin:
             if not self.wait_for_ready:  # if wait_for_ready flag is not true, move to the next song.
                 if var.playlist.next():
                     current = var.playlist.current_item()
+                    self._quiet_relaunch = False  # 换了新歌,跳片段留下的静默标记作废
                     self.log.debug(f"bot: next into the song: {current.format_debug_string()}")
                     try:
                         self.start_download(current)
@@ -658,6 +883,7 @@ class PlayerMixin:
     def play(self, index=-1, start_at=0):
         if not self.is_pause:
             self.interrupt()
+        self._quiet_relaunch = False
 
         if index != -1:
             var.playlist.point_to(index)
@@ -700,8 +926,9 @@ class PlayerMixin:
         self.interrupt()
         self.is_pause = True
         self.song_start_at = -1
-        if len(var.playlist) > 0:
-            self.pause_at_id = var.playlist.current_item().id
+        current = var.playlist.current_item() if len(var.playlist) > 0 else None
+        if current:
+            self.pause_at_id = current.id
             self.log.info(f"bot: music paused at {self.playhead:.2f} seconds.")
 
     def resume(self):

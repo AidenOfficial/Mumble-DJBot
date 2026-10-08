@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { thumbnailUrl } from '../api'
+import { formatBytes, thumbnailUrl } from '../api'
 import Controls from './Controls.vue'
+import AddToPlaylist from './AddToPlaylist.vue'
+import PrepPanel from './PrepPanel.vue'
 import { formatTime, useStatus } from '../composables/useStatus'
 
-const { status, error, clock, progress } = useStatus()
+const { status, error, clock, progress, syncedAt } = useStatus()
 
 const current = computed(() => status.value?.current ?? null)
 
@@ -18,6 +20,17 @@ watch(
   },
   { immediate: true },
 )
+
+const titlePending = computed(() =>
+  !!status.value?.prep && /^https?:\/\//.test(current.value?.title ?? ''))
+
+const skipBlocks = computed(() => {
+  const d = current.value?.duration || 0
+  if (!d) return []
+  return (current.value?.skip_segments ?? []).map(([start, end]) => ({
+    start, end, left: (start / d) * 100, width: (Math.min(end, d) - start) / d * 100,
+  }))
+})
 
 const sourceLabel = computed(() => {
   const t = current.value?.type ?? ''
@@ -58,7 +71,14 @@ const sourceLabel = computed(() => {
     <!-- title / source -->
     <div class="flex w-full flex-col items-center gap-1 text-center">
       <template v-if="current">
-        <h1 class="max-w-full truncate text-xl font-semibold sm:text-2xl" :title="current.title">
+        <!-- 还在读取信息时标题就是链接本身:先显示占位,链接用小字 -->
+        <template v-if="titlePending">
+          <h1 class="max-w-full truncate text-xl font-semibold sm:text-2xl" :style="{ color: 'var(--c-text-muted)' }">
+            Loading title…
+          </h1>
+          <p class="max-w-full truncate text-xs" :style="{ color: 'var(--c-text-faint)' }">{{ current.title }}</p>
+        </template>
+        <h1 v-else class="max-w-full truncate text-xl font-semibold sm:text-2xl" :title="current.title">
           {{ current.title || 'Untitled' }}
         </h1>
         <p class="flex items-center gap-2 text-sm" :style="{ color: 'var(--c-text-muted)' }">
@@ -67,6 +87,7 @@ const sourceLabel = computed(() => {
             :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
           >{{ sourceLabel }}</span>
           <span v-if="current.artist && current.artist !== '??'">{{ current.artist }}</span>
+          <AddToPlaylist :source="{ source: 'current' }" label="Save" />
         </p>
       </template>
       <template v-else>
@@ -79,25 +100,52 @@ const sourceLabel = computed(() => {
       </template>
     </div>
 
+    <!-- 还没出声:显示在等什么、还要多久 -->
+    <PrepPanel v-if="current && status?.prep" :prep="status.prep" :synced-at="syncedAt" />
+
     <!-- progress -->
-    <div v-if="current" class="w-full max-w-xl">
+    <div v-else-if="current" class="w-full max-w-xl">
       <div
-        class="h-1.5 w-full overflow-hidden rounded-full"
+        class="relative h-1.5 w-full overflow-hidden rounded-full"
         :style="{ background: 'var(--c-surface-2)' }"
         role="progressbar"
         :aria-valuenow="Math.round(progress * 100)"
         aria-valuemin="0"
         aria-valuemax="100"
       >
+        <!-- 边下边播时已经下载到的位置(像视频网站的缓冲条) -->
         <div
-          class="h-full rounded-full"
+          v-if="current.download"
+          class="absolute inset-y-0 left-0 rounded-full"
+          :style="{ width: `${current.download.progress * 100}%`, background: 'var(--c-accent-soft)', transition: 'width 800ms linear' }"
+        />
+        <div
+          class="relative h-full rounded-full"
           :style="{ width: `${progress * 100}%`, background: 'var(--c-accent)', transition: 'width 200ms linear' }"
+        />
+      </div>
+      <!-- SponsorBlock 会跳过的片段 -->
+      <div v-if="skipBlocks.length" class="relative -mt-1.5 h-1.5 w-full" aria-hidden="true">
+        <div
+          v-for="(b, i) in skipBlocks"
+          :key="i"
+          class="absolute inset-y-0 rounded-full"
+          :style="{ left: `${b.left}%`, width: `${b.width}%`, background: 'repeating-linear-gradient(135deg, var(--c-text-faint) 0 3px, transparent 3px 6px)', opacity: 0.7 }"
+          :title="`Skipped: ${formatTime(b.start)}–${formatTime(b.end)}`"
         />
       </div>
       <div class="mt-1.5 flex justify-between text-xs tabular-nums" :style="{ color: 'var(--c-text-muted)' }">
         <span>{{ formatTime(clock.playhead) }}</span>
         <span>{{ current.duration ? formatTime(current.duration) : '--:--' }}</span>
       </div>
+      <p v-if="current.download" class="mt-1 text-center text-[11px] tabular-nums" :style="{ color: 'var(--c-text-faint)' }">
+        ⇣ Still downloading in the background · {{ Math.round(current.download.progress * 100) }}%<template
+          v-if="current.download.speed"> · {{ formatBytes(current.download.speed) }}/s</template><template
+          v-if="current.download.eta"> · done in {{ formatTime(current.download.eta) }}</template>
+      </p>
+      <p v-if="skipBlocks.length" class="mt-1 text-center text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
+        ⏭ Skipping {{ skipBlocks.length }} non-music part{{ skipBlocks.length === 1 ? '' : 's' }} (SponsorBlock)
+      </p>
     </div>
 
     <!-- controls -->

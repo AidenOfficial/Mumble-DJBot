@@ -1,6 +1,8 @@
+import copy
 import threading
 import logging
 import os
+import time
 import hashlib
 import traceback
 from PIL import Image
@@ -66,6 +68,18 @@ class URLItem(BaseItem):
         # from then on this item waits for the full download.
         self.no_stream = False
         self.type = "url"
+        # 准备进度(Web 界面的"还要等多久"用):
+        #   pending -> fetching_info -> starting -> downloading -> ready / failed
+        self.stage = 'ready' if self.ready == 'yes' else 'pending'
+        self.stage_since = time.time()
+        self.speed = 0.0            # 字节/秒
+        self.downloaded_bytes = 0
+        self.total_bytes = 0
+        self.download_eta = None    # 下载完整个文件还要几秒(yt-dlp 估算)
+        # 校验时读到的 yt-dlp 信息,开始下载时直接复用,省掉第二次读取(实测 B 站约 4 秒)
+        self._info = None
+        self._info_at = 0.0
+        self._info_cookies = []
 
     def uri(self):
         return self.path
@@ -130,17 +144,53 @@ class URLItem(BaseItem):
 
     # Run in a other thread
     def prepare(self):
-        if not self.downloading:
-            assert self.ready == 'validated'
-            return self._download()
-        else:
-            assert self.ready == 'yes'
+        # 以前这里是两个 assert:清理线程把 ready 从 yes 改回 validated、
+        # 或上一次下载失败留下 failed 时,AssertionError 会直接打死下载线程。
+        if self.is_ready():
             return True
+        if self.downloading:
+            return True  # 另一个线程正在下载,主循环会轮询 is_ready()
+        if self.ready != 'validated':
+            self.validate()
+        return self._download()
+
+    # 各阶段最近的典型耗时(指数平均),用来在拿不到下载速度时估算"还要多久"
+    typical_secs = {'fetching_info': 4.5, 'starting': 1.0}
+
+    def _set_stage(self, stage):
+        if self.stage != stage:
+            now = time.time()
+            finished = self.stage
+            if finished in self.typical_secs and stage not in ('failed',):
+                spent = now - self.stage_since
+                if 0 < spent < 120:
+                    URLItem.typical_secs[finished] = self.typical_secs[finished] * 0.7 + spent * 0.3
+            self.stage = stage
+            self.stage_since = now
+
+    def eta_estimate(self):
+        """还在读信息 / 建连接时,按近期典型耗时粗估开播还要几秒。"""
+        left = 0.0
+        elapsed = time.time() - self.stage_since
+        if self.stage in ('pending', 'fetching_info'):
+            done = elapsed if self.stage == 'fetching_info' else 0
+            left += max(0.5, self.typical_secs['fetching_info'] - done) + self.typical_secs['starting']
+        elif self.stage == 'starting':
+            left += max(0.3, self.typical_secs['starting'] - elapsed)
+        else:
+            return None
+        return left + 0.5  # 缓冲 30 秒音频 + ffmpeg 启动,实测约 0.3-0.5 秒
+
+    INFO_REUSE_SECONDS = 1800  # 信息里的音频直链会过期(B 站约 2 小时,YouTube 约 6 小时),留足余量
 
     def _get_info_from_url(self):
         self.log.info("url: fetching metadata of url %s " % self.url)
+        self._set_stage('fetching_info')
         ydl_opts = {
-            'noplaylist': True
+            'noplaylist': True,
+            # 和下载用同一个格式:读到的信息里选好的就是要下载的音频流,下载时可以直接复用。
+            # (用默认格式会选成"视频+音频",复用时把视频流/直链带进下载,实测 B 站返回 403)
+            'format': 'bestaudio/best',
         }
 
         cookie = var.config.get('youtube_dl', 'cookie_file')
@@ -157,18 +207,32 @@ class URLItem(BaseItem):
             for i in range(attempts):
                 try:
                     info = ydl.extract_info(self.url, download=False)
-                    self.duration = info['duration']
-                    self.title = info['title'].strip()
-                    self.keywords = self.title
-                    succeed = True
-                    return True
                 except youtube_dl.utils.DownloadError:
-                    pass
-                except KeyError:  # info has no 'duration'
-                    break
+                    continue
+                except Exception:
+                    self.log.warning("url: metadata extraction crashed for %s", self.url, exc_info=True)
+                    continue
+                if not info:
+                    continue
+                # 直播/首映/部分 B 站条目没有时长或标题,yt-dlp 给 None;
+                # 以前直接拿 None 去和 max_duration 比较,TypeError 打死线程。
+                try:
+                    self.duration = int(info.get('duration') or 0)
+                except (TypeError, ValueError):
+                    self.duration = 0
+                self.title = str(info.get('title') or self.url).strip()
+                self.keywords = self.title
+                if info.get('_type', 'video') == 'video':
+                    # 直链可能绑定了读取时拿到的 cookie(B 站 buvid 等),一起留着给下载用
+                    self._info, self._info_at = info, time.time()
+                    self._info_cookies = list(ydl.cookiejar)
+                self._set_stage('pending')
+                succeed = True
+                return True
 
         if not succeed:
             self.ready = 'failed'
+            self._set_stage('failed')
             self.log.error("url: error while fetching info from the URL")
             raise ValidationFailedError(tr('unable_download', item=self.format_title()))
 
@@ -196,16 +260,29 @@ class URLItem(BaseItem):
         # near the end of the file the margin cannot be satisfied anymore
         return downloaded_secs >= min(self.duration - 1, playhead + buffer_secs)
 
+    @staticmethod
+    def _enforce_cache_limit():
+        # 按 LRU 把缓存压到 tmp_folder_max_size 以内(不碰固定/队列中/下载中的条目)
+        try:
+            from bot import cache_store
+            cache_store.enforce_size_limit()
+        except Exception:
+            log.warning("url: cache size enforcement failed", exc_info=True)
+
     def _download(self):
-        util.clear_tmp_folder(var.tmp_folder, var.config.getint('bot', 'tmp_folder_max_size'))
+        self._enforce_cache_limit()
 
         self.downloading = True
         self.progress = 0.0
+        self.speed = 0.0
+        self.downloaded_bytes = self.total_bytes = 0
+        self.download_eta = None
         base_path = var.tmp_folder + self.id
         save_path = base_path
 
         # Download only if music is not existed
         self.ready = "preparing"
+        self._set_stage('starting')
 
         # Stream-while-downloading needs the file to grow in place at its
         # final path (no .part + rename), so ffmpeg can read it while yt-dlp
@@ -220,19 +297,19 @@ class URLItem(BaseItem):
                 streaming = False
 
         self.log.info("bot: downloading url (%s) %s " % (self.title, self.url))
+        # 封面不再用 yt-dlp 的 writethumbnail 在下载前同步抓取+转换(会推迟音频开始下载),
+        # 改为拿到信息后在后台线程单独下载
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': base_path,
             'noplaylist': True,
-            'writethumbnail': True,
             'updatetime': False,
             'verbose': var.config.getboolean('debug', 'youtube_dl'),
             'progress_hooks': [self._ydl_progress_hook],
-            'postprocessors': [{
-                'key': 'FFmpegThumbnailsConvertor',
-                'format': 'jpg',
-                'when': 'before_dl'
-            }]
+            # B 站 CDN 会在传输中途断开长连接(实测 "22089194 bytes read, 51358771 more expected"),
+            # 让 yt-dlp 自己多续传几次
+            'retries': 15,
+            'socket_timeout': 20,
         }
         if streaming:
             ydl_opts['nopart'] = True
@@ -246,18 +323,31 @@ class URLItem(BaseItem):
             youtube_dl.utils.std_headers['User-Agent'] = var.config.get('youtube_dl', 'user_agent')
 
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            attempts = var.config.getint('bot', 'download_attempts')
+            attempts = max(1, var.config.getint('bot', 'download_attempts'))
             download_succeed = False
             for i in range(attempts):
                 self.log.info("bot: download attempts %d / %d" % (i + 1, attempts))
                 try:
-                    ydl.extract_info(self.url)
+                    info = self._fresh_info() if i == 0 else None
+                    if info is not None:
+                        # 复用校验时读到的信息直接下载(等同 yt-dlp --load-info-json),
+                        # 省掉第二次读取:实测 B 站从 4.7 秒缩到 0.7 秒开始收到数据
+                        for c in self._info_cookies:
+                            ydl.cookiejar.set_cookie(c)
+                        info = ydl.process_ie_result(info, download=True)
+                    else:
+                        info = ydl.extract_info(self.url)  # 重试时重新读取,拿新的直链
+                    self._fetch_thumbnail_async(info, base_path)
+                    self._normalize_download_path(info, base_path)
                     download_succeed = True
                     break
                 except:
                     error_traceback = traceback.format_exc().split("During")[0]
                     error = error_traceback.rstrip().split("\n")[-1]
                     self.log.error("bot: download failed with error:\n %s" % error)
+                    # 不删已下载的部分:下一次尝试从断点续传(边下边播时正在播放的也是这个文件)
+                    if i + 1 < attempts:
+                        time.sleep(min(2 ** i, 8))
 
             if download_succeed:
                 try:
@@ -266,18 +356,83 @@ class URLItem(BaseItem):
                     pass
                 self.path = save_path
                 self.ready = "yes"
+                self._set_stage('ready')
                 self.log.info(
                     "bot: finished downloading url (%s) %s, saved to %s." % (self.title, self.url, self.path))
                 self.downloading = False
-                self._read_thumbnail_from_file(base_path + ".jpg")
+                if not self.thumbnail:
+                    self._read_thumbnail_from_file(base_path + ".jpg")
                 self.version += 1  # notify wrapper to save me
+                self._enforce_cache_limit()
                 return True
             else:
                 for f in glob.glob(base_path + "*"):
-                    os.remove(f)
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass  # 清理线程可能已经删掉了
                 self.ready = "failed"
+                self._set_stage('failed')
                 self.downloading = False
                 raise PreparationFailedError(tr('unable_download', item=self.format_title()))
+
+    def _normalize_download_path(self, info, base_path):
+        """bot 约定缓存文件就叫 <id>(不带扩展名)。万一 yt-dlp 实际写成了别的名字
+        (实测出现过 <id>.m4a,结果下载完立刻被判"文件丢失"),改回约定的名字。"""
+        if os.path.exists(base_path):
+            return
+        for download in (info or {}).get('requested_downloads') or []:
+            actual = download.get('filepath') or download.get('_filename')
+            if actual and actual != base_path and os.path.exists(actual):
+                os.replace(actual, base_path)
+                self.log.info("url: renamed downloaded file %s -> %s", actual, base_path)
+                return
+        for candidate in glob.glob(glob.escape(base_path) + '.*'):
+            if not candidate.endswith(('.jpg', '.incomplete', '.part', '.ytdl')):
+                os.replace(candidate, base_path)
+                self.log.info("url: renamed downloaded file %s -> %s", candidate, base_path)
+                return
+
+    def _fresh_info(self):
+        """校验时读到的信息还新鲜就拿来复用(深拷贝:yt-dlp 会就地改写)。"""
+        if self._info is None or time.time() - self._info_at > self.INFO_REUSE_SECONDS:
+            return None
+        info, self._info = self._info, None  # 只用一次,失败重试时重新读取
+        return copy.deepcopy(info)
+
+    def _fetch_thumbnail_async(self, info, base_path):
+        url = (info or {}).get('thumbnail')
+        if not url or self.thumbnail:
+            return
+
+        def run():
+            try:
+                import requests
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                if 'hdslb.com' in url or 'bilibili' in url:
+                    headers['Referer'] = 'https://www.bilibili.com/'
+                r = requests.get(url, headers=headers, timeout=10)
+                r.raise_for_status()
+                im = Image.open(BytesIO(r.content))
+                im.convert('RGB').save(base_path + '.jpg', format='JPEG', quality=88)  # 缓存页/存入曲库用
+                self.thumbnail = self._prepare_thumbnail(im)
+                self.version += 1
+            except Exception:
+                self.log.debug("url: thumbnail fetch failed for %s", url, exc_info=True)
+
+        threading.Thread(target=run, name="Thumb-" + self.id[:7], daemon=True).start()
+
+    def eta_to_playable(self, playhead, buffer_secs, can_stream):
+        """估算还要几秒能开始播放;不知道(还在读信息/连接中、没有速度数据)返回 None。"""
+        if self.ready == 'yes':
+            return 0.0
+        if self.stage != 'downloading' or not self.speed or not self.total_bytes:
+            return None
+        if can_stream and self.duration and not self.no_stream:
+            need = min(self.duration - 1, playhead + buffer_secs) / self.duration * self.total_bytes
+        else:
+            need = self.total_bytes
+        return max(0.0, (need - self.downloaded_bytes) / self.speed)
 
     def _ydl_progress_hook(self, d):
         # Called frequently by yt-dlp while downloading; keep it cheap.
@@ -285,6 +440,13 @@ class URLItem(BaseItem):
         if status == 'downloading':
             total = d.get('total_bytes') or d.get('total_bytes_estimate')
             done = d.get('downloaded_bytes', 0)
+            self._set_stage('downloading')
+            self.downloaded_bytes = done or 0
+            self.total_bytes = total or 0
+            if d.get('speed'):
+                # 平滑一下,yt-dlp 的瞬时速度抖得很厉害
+                self.speed = d['speed'] if not self.speed else self.speed * 0.7 + d['speed'] * 0.3
+            self.download_eta = d.get('eta')
             if total:
                 try:
                     self.progress = max(0.0, min(1.0, done / total))
@@ -294,9 +456,13 @@ class URLItem(BaseItem):
             self.progress = 1.0
 
     def _read_thumbnail_from_file(self, path_thumbnail):
-        if os.path.isfile(path_thumbnail):
-            im = Image.open(path_thumbnail)
-            self.thumbnail = self._prepare_thumbnail(im)
+        # 封面坏了不影响播放,别让 PIL 的异常把"下载成功"变成崩溃
+        try:
+            if os.path.isfile(path_thumbnail):
+                im = Image.open(path_thumbnail)
+                self.thumbnail = self._prepare_thumbnail(im)
+        except Exception:
+            self.log.debug("url: could not read thumbnail %s", path_thumbnail, exc_info=True)
 
     def _prepare_thumbnail(self, im):
         im.thumbnail((100, 100), Image.LANCZOS)

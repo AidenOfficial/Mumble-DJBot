@@ -35,6 +35,8 @@ from database import Condition
 import util
 import variables as var
 
+from . import cache_store
+
 log = logging.getLogger("bot")
 
 DAY_SECONDS = 24 * 3600
@@ -195,6 +197,11 @@ class CacheCleaner:
         except Exception:
             pass
 
+        # 固定的、常听的条目不按天数过期;"最后使用"取最后播放与下载时间的较晚者
+        pins = cache_store.pinned_ids()
+        usage = cache_store._usage()
+        keep_plays = cache_store.auto_keep_plays()
+
         removed = []
         try:
             names = os.listdir(folder)
@@ -210,6 +217,13 @@ class CacheCleaner:
             if not (_HEX_ID_RE.match(base) or os.path.abspath(path) in known_paths):
                 continue
             if os.path.abspath(path) in protected:
+                continue
+            if base in pins:
+                continue
+            plays, last_played = usage.get(base, (0, 0.0))
+            if keep_plays > 0 and plays >= keep_plays:
+                continue
+            if last_played and now - last_played < self.keep_days * DAY_SECONDS:
                 continue
             if not self._is_expired(path, now):
                 continue

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { postQueue as _pq, thumbnailUrl as _tn } from '../api'
 import { formatTime, useStatus } from '../composables/useStatus'
+import AddToPlaylist from './AddToPlaylist.vue'
 
 interface SearchResult {
   source: 'youtube' | 'bilibili'
@@ -131,6 +132,9 @@ const SOURCE_STYLE: Record<string, { label: string; bg: string; fg: string }> = 
             <span v-if="r.duration" class="shrink-0 tabular-nums">{{ formatTime(r.duration) }}</span>
           </p>
         </div>
+        <AddToPlaylist
+          :source="{ source: 'url', url: r.url, title: r.title, duration: r.duration, provider: r.source, id: r.id }"
+        />
         <button
           class="shrink-0 cursor-pointer rounded-full border-0 px-3.5 py-2 text-xs font-semibold"
           :style="added[`${r.source}:${r.id}`] === 'done'

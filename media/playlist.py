@@ -259,6 +259,13 @@ class BasePlaylist(list):
     def _check_valid(self):
         self.log.debug("playlist: start validating...")
         self.validating_thread_lock.acquire()
+        try:
+            self._validate_pending()
+        finally:
+            # 以前异常会让锁永远不释放,之后加的歌再也不会被校验
+            self.validating_thread_lock.release()
+
+    def _validate_pending(self):
         while len(self.pending_items) > 0:
             item = self.pending_items.pop()
             try:
@@ -282,12 +289,16 @@ class BasePlaylist(list):
                 self.remove_by_id(item.id)
                 var.cache.free_and_delete(item.id)
                 continue
+            except Exception:
+                # 任何意外错误只影响这一首,校验线程继续处理后面的
+                self.log.exception("playlist: unexpected error while validating %s", item.id)
+                self.remove_by_id(item.id)
+                continue
 
             if item.version > ver:
                 self.version += 1
 
         self.log.debug("playlist: validating finished.")
-        self.validating_thread_lock.release()
 
 
 class OneshotPlaylist(BasePlaylist):

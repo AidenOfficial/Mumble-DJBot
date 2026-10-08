@@ -16,6 +16,7 @@ import util
 import variables as var
 import web_search
 from media.cache import get_cached_wrapper_from_scrap
+from web_users import current_user_name
 
 
 def _current_wrapper():
@@ -37,6 +38,14 @@ def _item_summary(wrapper, index):
         'duration': getattr(item, 'duration', 0) or 0,
         'has_thumbnail': bool(getattr(item, 'thumbnail', None)),
     }
+    if getattr(item, 'downloading', False):
+        # 后台下载中(预下载/边下边播):队列里显示进度,播放条上画"已缓冲"部分
+        summary['download'] = {
+            'progress': round(getattr(item, 'progress', 0.0) or 0.0, 4),
+            'speed': round(getattr(item, 'speed', 0.0) or 0.0),
+            'eta': getattr(item, 'download_eta', None),
+            'stage': getattr(item, 'stage', ''),
+        }
     return summary
 
 
@@ -56,15 +65,27 @@ def _status_payload():
         'current_index': var.playlist.current_index,
         'server_time': time.time(),
         'current': None,
+        'prep': None,
     }
     if current is not None:
         try:
             payload['current'] = _item_summary(
                 current, var.playlist.current_index)
+            # SponsorBlock 要跳过的片段,前端在进度条上标出来
+            skip_for = getattr(bot, 'skip_segments_for', None)
+            payload['current']['skip_segments'] = skip_for(current.id) if skip_for else []
+            # 还没出声:告诉前端在等什么、还要多久
+            waiting = getattr(bot, 'is_waiting_for', None)
+            if waiting and waiting(current.id):
+                payload['prep'] = bot.prep_status(current)
         except Exception:
             # an item mid-eviction must not break the poll
             payload['current'] = None
     return payload
+
+
+# 其他蓝图(web_users)复用
+status_payload = _status_payload
 
 
 def _set_volume(value):
@@ -280,7 +301,7 @@ def create_blueprint(requires_auth):
         if not url or not url.lower().startswith(('http://', 'https://')):
             abort(400)
         music_wrapper = get_cached_wrapper_from_scrap(
-            type='url', url=url, user='Web Search')
+            type='url', url=url, user=current_user_name())
         var.playlist.append(music_wrapper)
         if len(var.playlist) == 2:
             # mirror the legacy add_url behavior: if this became the next
@@ -293,7 +314,17 @@ def create_blueprint(requires_auth):
     def api_stats():
         if var.play_history is None:
             abort(503)
-        return jsonify(var.play_history.stats())
+        stats = var.play_history.stats()
+        if var.user_db is not None:
+            # 绑定了 Mumble 的人:聊天点歌(记的是 Mumble 名)和网页点歌(记的是别名)合并成一行
+            names = var.user_db.requester_display_names()
+            merged = {}
+            for row in stats.get('top_users', []):
+                name = names.get(row['user'], row['user'])
+                merged[name] = merged.get(name, 0) + row['count']
+            stats['top_users'] = [{'user': u, 'count': c}
+                                  for u, c in sorted(merged.items(), key=lambda kv: -kv[1])]
+        return jsonify(stats)
 
     @api.route('/thumbnail/<item_id>', methods=['GET'])
     @requires_auth

@@ -144,9 +144,13 @@ SSH 里执行 `crontab -e`,加一行(每天凌晨 5 点重启):
 | 改了机器人代码后 | `docker compose up -d --build` |
 | 进容器内部排查 | `docker exec -it mumble-music bash` |
 
-**数据持久化**:`configuration.ini`、`data/`(状态数据库)、`music_folder/`
-(本地音乐)、`spotdl_cache/`(Spotify 下载缓存)都挂载在 `<项目目录>` 下,
-容器删除重建都不会丢。
+**数据持久化**:`configuration.ini`、`data/`(状态数据库、Web 用户别名与个人歌单)、
+`music_folder/`(本地音乐 + Web 上传)、`cache/`(YouTube / B 站下载缓存)、
+`spotdl_cache/`(Spotify 下载缓存)都挂载在 `<项目目录>` 下,容器删除重建都不会丢。
+
+> 从旧版本升级:`cache/` 是新加的挂载(以前缓存在容器内的 `/tmp`,每次重建都清空)。
+> `docker compose up -d --build` 时 Docker 会自动建好这个目录。缓存上限默认 4GB,
+> 在 Web UI 的 **Cache** 页查看占用、固定常听的歌、手动释放空间。
 
 ---
 
@@ -178,6 +182,13 @@ SSH 里执行 `crontab -e`,加一行(每天凌晨 5 点重启):
   `<项目目录>/cookies/`;在 `docker-compose.yml` 里取消 `./cookies` 那行挂载的注释;
   在 `configuration.ini` 的 `[youtube_dl]` 段加
   `cookie_file = /botamusique/cookies/bili.txt`;最后 `docker compose up -d`。
+
+**机器人反复重启 / 想查崩溃原因**
+- `docker compose logs --since 24h botamusique | grep -E "CRITICAL|Traceback|ERROR" -A 20`
+  能看到最近一天的异常栈。`playback loop stalled` 表示主循环被卡住、看门狗主动重启;
+  `unhandled exception in thread` 表示某个工作线程出错(新版只记录、不再整个退出)。
+- `docker inspect -f '{{.RestartCount}} {{.State.ExitCode}}' mumble-music` 看重启次数与上次退出码
+  (137 = 被 OOM 或 docker kill,1 = 程序主动退出)。
 
 **机器人在频道里但没声音 / 想看详细日志**
 - 在 `configuration.ini` 的 `[debug]` 段加 `ffmpeg = True` 和 `youtube_dl = True`,

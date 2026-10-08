@@ -118,6 +118,68 @@
 
 **全部目标 DONE。** 提交序列(本地,待 push):A1 缓存清理 → A2 边下边播 → A3 预取 → B0 方案 → B2 API → webui 脚手架+B1 → B5 控制/队列 → B3 搜索 → B4 统计 → B5 拖拽+曲库 → B6 切换/文档。测试 20 → **109 passed**;pyflakes 无新增告警;每步截图/Playwright 交互验证。
 
+## 第二轮(2026-10-08):线上使用反馈五项
+
+环境同上一轮:云端容器,**拿不到 AidenLABS 上的 Docker 日志**(容器没有到 NAS 的网络/SSH),
+崩溃原因靠代码审查 + 本地复现定位。验证手段:pytest(Python 3.12,与镜像一致)、
+pyflakes、真实 ffmpeg、桩后端 + Playwright 截图/交互。
+
+### C1. 崩溃加固 — DONE
+- **已复现的崩溃路径**:ffmpeg `-ss` 放在 `-i` 之后(输出端 seek)要把前面全部解码 + loudnorm。
+  本地实测 1 小时音频从 50:00 恢复播放耗时 **68 秒**;2 小时处恢复必然超过 `watchdog_timeout=120`,
+  看门狗 `os._exit(1)`。改为输入端 seek(0.1 秒),增长中的 webm / fragmented m4a 也实测可用。
+- `threading.excepthook` 不再因任意工作线程异常整个退出(只有 WebThread 死掉才退出)。
+- 其余兜底:yt-dlp 返回 None 时长/标题、`prepare()` 的 assert、清理竞态、封面解析、
+  下载/校验线程意外异常(校验锁总会释放)、pymumble 回调线程里的消息处理/用户变更、
+  `send_*_msg` 永不抛异常;网络流加 `-reconnect`/`-rw_timeout`;SIGTERM 优雅退出;
+  队列每 15 秒有变化即落盘(崩溃不再丢队列)。
+- 测试:tests/test_stability.py(9 个)。
+
+### C2/C3. Access 身份 + 别名 + 个人歌单 — DONE
+- `web_users.py`:身份 = Access 邮箱头(默认)或校验过的 Access JWT(配置 `access_team_domain`
+  + `access_aud` 后启用,无合法 JWT 一律 403);退化到 password/token 用户名;否则匿名。
+- 点歌署名改用别名(顺带修掉 interface.py 全局 `user` 的跨请求竞态)。
+- 个人歌单存 settings 库(总在磁盘上);条目存 URL/本地路径,不怕缓存被清。
+- UI:右上角用户标识与别名编辑、各页 ♡ 加入歌单、Playlists 页。测试 16 个。
+
+### C4. 缓存管理 — DONE
+- `bot/cache_store.py`:LRU(最后使用 = max(最后播放, 下载时间))、固定、常听(≥3 次)保留、
+  手动删除、存入曲库;`tmp_folder_max_size` 默认 10MB → 4096MB(原 clear_tmp_folder 有 off-by-one,
+  文件一大基本什么都不删)。Docker 缓存目录改为挂载卷(`BAM_TMP_FOLDER`)。
+- UI:Cache 页。测试 11 个。
+
+### C5. 大文件 — DONE
+- 输入端 seek(见 C1);`max_track_duration` 默认 60 → 0(不限);`stream_while_downloading` 默认开启。
+- 分片上传 `web_upload.py`(32MB/片,断点续传,绕过 Cloudflare 100MB 限制),视频默认抽音轨成 .mka,
+  完成后直接登记曲库。上限默认 30M → 4G。测试 7 个(含真实 ffmpeg 抽音轨);浏览器端到端实测。
+
+### 待本机复验
+1. 部署后看一天 `docker compose logs`,确认不再出现 `playback loop stalled` / 线程异常退出。
+2. configuration.ini 里如果有 `max_track_duration = 180`(旧文档建议),删掉才能放超长视频。
+3. 边下边播现在默认开:用一个 2 小时以上的 B 站 / YouTube 视频实测起播时间与中途拖动。
+4. Access 邮箱头:打开 Web UI 右上角应显示自己的邮箱。
+
+## 第三轮(2026-10-08):频道跟随 + 四项新功能
+
+- **频道**:Settings 页实时频道树、Web 配置默认频道、跟随模式(auto / 跟随指定用户)。
+  pymumble 回调持锁调用,只记账,决策放到 2.5 秒防抖定时器。测试 15 个。
+- **无人自动暂停**:默认 5 分钟,有人回来自动继续,只恢复自己暂停的;跟随优先。
+  测试发现并修掉"自动暂停后手动继续,下一轮立刻又被暂停"的问题。
+- **跳过非音乐片段**:SponsorBlock(YouTube)+ BilibiliSponsorBlock(bsbsb.top),哈希前缀查询;
+  播放时跳到片段结尾,不改文件。B 站内部存 av 号,补了 av→BV 反向转换(与 util.bv_to_av 往返验证)。
+  两个接口都在本容器实测返回正常。
+- **导入歌单**:YouTube 直接导入;网易云(歌单接口 + 批量歌曲详情,绕过未登录只给 10 首的限制)
+  和 Spotify(spotdl save)读元数据后匹配 YouTube。B 站收藏夹按用户要求不做。
+  匹配打分实测:YOASOBI 选中官方 MV(而不是时长更接近的 AMV),Nickelback 选中官方视频。
+- **Mumble 绑定**:6 位一次性码 + 失败锁定;`!bind` `!unbind` `!mylist` `!fav`;统计页合并同一人。
+- 测试 234 个全部通过;UI 截图桌面/移动 × 深浅色。
+
+### 待本机复验(第三轮)
+1. 跟随:换频道时 bot 是否跟过去;没权限的频道被拒后留在原地。
+2. 自动暂停:频道空 5 分钟后暂停,有人进来后继续。
+3. SponsorBlock:放一个带片头说话的 MV,确认跳过时没有卡顿/重复播报。
+4. `!bind`:在 Mumble 里私聊 bot 完成绑定,`!mylist` / `!fav` 正常。
+
 ## DECISIONS 待决区
 
 ### ⚠️ push 被 403 拒绝(需要用户处理)
