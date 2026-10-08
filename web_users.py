@@ -30,6 +30,7 @@ ALIAS_MAX_LEN = 24
 NAME_MAX_LEN = 60
 MAX_PLAYLISTS_PER_USER = 50
 MAX_ITEMS_PER_PLAYLIST = 1000
+BIND_CODE_TTL = 600
 # 别名会被拼进 Mumble 的 HTML 消息里,禁止尖括号等标记字符
 _ALIAS_RE = re.compile(r'^[^<>&"\'\x00-\x1f]+$')
 
@@ -184,6 +185,18 @@ class UserDatabase:
                 "added_at REAL NOT NULL)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_user_playlist_item_pl "
                          "ON user_playlist_item (playlist_id, position)")
+            # Mumble 账号 <-> Web 身份。一个 Web 身份只绑一个 Mumble 账号
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS mumble_link ("
+                "mumble_key TEXT PRIMARY KEY,"
+                "identity TEXT NOT NULL UNIQUE,"
+                "mumble_name TEXT NOT NULL DEFAULT '',"
+                "linked_at REAL NOT NULL)")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS bind_code ("
+                "code TEXT PRIMARY KEY,"
+                "identity TEXT NOT NULL,"
+                "expires_at REAL NOT NULL)")
 
     def _conn(self):
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -227,6 +240,76 @@ class UserDatabase:
                          "VALUES (?, ?, ?, ?, ?) "
                          "ON CONFLICT(identity) DO UPDATE SET alias=excluded.alias, "
                          "last_seen=excluded.last_seen", (identity, email, alias, now, now))
+
+    # ---- Mumble 绑定 ----------------------------------------------------------
+
+    def create_bind_code(self, identity, ttl=BIND_CODE_TTL):
+        import secrets
+
+        now = time.time()
+        with self._conn() as conn:
+            conn.execute("DELETE FROM bind_code WHERE identity=? OR expires_at<?", (identity, now))
+            for _ in range(20):
+                code = f"{secrets.randbelow(1000000):06d}"
+                try:
+                    conn.execute("INSERT INTO bind_code (code, identity, expires_at) VALUES (?, ?, ?)",
+                                 (code, identity, now + ttl))
+                    return code, now + ttl
+                except sqlite3.IntegrityError:
+                    continue
+        raise RuntimeError('could not allocate a bind code')
+
+    def consume_bind_code(self, code, mumble_key, mumble_name):
+        """校验并消耗绑定码(一次性)。成功返回 identity,否则 None。"""
+        now = time.time()
+        with self._conn() as conn:
+            row = conn.execute("SELECT identity FROM bind_code WHERE code=? AND expires_at>=?",
+                               (code, now)).fetchone()
+            if row is None:
+                return None
+            identity = row['identity']
+            conn.execute("DELETE FROM bind_code WHERE code=?", (code,))
+            conn.execute("DELETE FROM mumble_link WHERE identity=? OR mumble_key=?", (identity, mumble_key))
+            conn.execute("INSERT INTO mumble_link (mumble_key, identity, mumble_name, linked_at) "
+                         "VALUES (?, ?, ?, ?)", (mumble_key, identity, mumble_name, now))
+            return identity
+
+    def identity_for_mumble(self, mumble_key, mumble_name=None):
+        """按 Mumble 账号找 Web 身份;顺便更新记住的名字(改名后统计合并用)。"""
+        with self._conn() as conn:
+            row = conn.execute("SELECT identity, mumble_name FROM mumble_link WHERE mumble_key=?",
+                               (mumble_key,)).fetchone()
+            if row is None:
+                return None
+            if mumble_name and row['mumble_name'] != mumble_name:
+                conn.execute("UPDATE mumble_link SET mumble_name=? WHERE mumble_key=?", (mumble_name, mumble_key))
+            return row['identity']
+
+    def mumble_link_for(self, identity):
+        with self._conn() as conn:
+            row = conn.execute("SELECT mumble_name, linked_at FROM mumble_link WHERE identity=?",
+                               (identity,)).fetchone()
+            return dict(row) if row else None
+
+    def unlink_identity(self, identity):
+        with self._conn() as conn:
+            return conn.execute("DELETE FROM mumble_link WHERE identity=?", (identity,)).rowcount > 0
+
+    def unlink_mumble(self, mumble_key):
+        with self._conn() as conn:
+            return conn.execute("DELETE FROM mumble_link WHERE mumble_key=?", (mumble_key,)).rowcount > 0
+
+    def requester_display_names(self):
+        """{Mumble 名: Web 显示名}:统计页把同一个人在聊天和 Web 上的点歌合并。"""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT l.mumble_name, u.alias, u.email FROM mumble_link l "
+                                "LEFT JOIN web_user u ON u.identity = l.identity").fetchall()
+        names = {}
+        for r in rows:
+            display = r['alias'] or (r['email'].split('@', 1)[0] if r['email'] else None)
+            if r['mumble_name'] and display:
+                names[r['mumble_name']] = display
+        return names
 
     # ---- 歌单 ---------------------------------------------------------------
 
@@ -420,13 +503,19 @@ def wrapper_from_entry(entry, user):
 #  API
 # =====================================================================
 
-def _validate_alias(alias):
+def _validate_alias_text(alias):
+    """不合法抛 ValueError;空串表示清除别名。"""
     alias = (alias or '').strip()
-    if not alias:
-        return ''
-    if len(alias) > ALIAS_MAX_LEN or not _ALIAS_RE.match(alias):
-        abort(400)
+    if alias and (len(alias) > ALIAS_MAX_LEN or not _ALIAS_RE.match(alias)):
+        raise ValueError(alias)
     return alias
+
+
+def _validate_alias(alias):
+    try:
+        return _validate_alias_text(alias)
+    except ValueError:
+        abort(400)
 
 
 def _validate_name(name):
@@ -473,12 +562,37 @@ def _enqueue(wrappers, mode):
 def create_blueprint(requires_auth):
     api = Blueprint('users', __name__, url_prefix='/api')
 
+    def _me_payload(ident):
+        data = ident.to_dict()
+        data['jwt_verified'] = data['source'] == 'cloudflare-jwt'
+        data['mumble'] = var.user_db.mumble_link_for(ident.key) if ident.key and var.user_db else None
+        return data
+
     @api.route('/me', methods=['GET'])
     @requires_auth
     def me():
-        data = current_identity().to_dict()
-        data['jwt_verified'] = data['source'] == 'cloudflare-jwt'
-        return jsonify(data)
+        return jsonify(_me_payload(current_identity()))
+
+    @api.route('/me/bind', methods=['POST'])
+    @requires_auth
+    def create_bind():
+        """生成 6 位一次性绑定码,10 分钟有效;在 Mumble 里发 !bind <码> 完成绑定。"""
+        ident = current_identity()
+        if not ident.key or var.user_db is None:
+            abort(403)
+        code, expires_at = var.user_db.create_bind_code(ident.key)
+        symbol = var.config.get('commands', 'command_symbol', fallback='!')[:1] or '!'
+        name = var.config.get('commands', 'bind', fallback='bind').split(',')[0].strip()
+        return jsonify({'code': code, 'expires_at': expires_at, 'command': f"{symbol}{name} {code}"})
+
+    @api.route('/me/bind', methods=['DELETE'])
+    @requires_auth
+    def remove_bind():
+        ident = current_identity()
+        if not ident.key or var.user_db is None:
+            abort(403)
+        var.user_db.unlink_identity(ident.key)
+        return jsonify(_me_payload(ident))
 
     @api.route('/me', methods=['POST'])
     @requires_auth
@@ -493,7 +607,7 @@ def create_blueprint(requires_auth):
             return jsonify({'error': 'alias_taken'}), 409
         ident.alias = alias or None
         log.info("web: %s set alias to %r", ident.key, alias)
-        return jsonify(ident.to_dict())
+        return jsonify(_me_payload(ident))
 
     @api.route('/playlists', methods=['GET'])
     @requires_auth
@@ -510,6 +624,41 @@ def create_blueprint(requires_auth):
         except ValueError:
             return jsonify({'error': 'too_many_playlists'}), 409
         return jsonify(var.user_db.get_playlist(owner, playlist_id))
+
+    @api.route('/playlists/import', methods=['POST'])
+    @requires_auth
+    def import_playlist():
+        """Body: {url, playlist_id?(导入到已有歌单), name?(新歌单名,默认用来源标题)}
+        支持 YouTube 播放列表、网易云音乐歌单、Spotify 歌单/专辑。"""
+        import playlist_import
+
+        owner = _owner()
+        payload = _payload()
+        url = (payload.get('url') or '').strip()
+        if not url.lower().startswith(('http://', 'https://')) or len(url) > 2048:
+            abort(400)
+        if playlist_import.detect_source(url) is None:
+            return jsonify({'error': 'unsupported_source'}), 400
+        playlist_id = payload.get('playlist_id')
+        if playlist_id is not None:
+            try:
+                playlist_id = int(playlist_id)
+            except (TypeError, ValueError):
+                abort(400)
+            if var.user_db.get_playlist(owner, playlist_id) is None:
+                abort(404)
+        name = (payload.get('name') or '').strip()[:NAME_MAX_LEN] or None
+        return jsonify({'job_id': playlist_import.start_import(owner, url, playlist_id, name)})
+
+    @api.route('/playlists/import/<job_id>', methods=['GET'])
+    @requires_auth
+    def import_status(job_id):
+        import playlist_import
+
+        job = playlist_import.get_job(job_id)
+        if job is None or job['owner'] != _owner():
+            abort(404)
+        return jsonify({k: v for k, v in job.items() if k != 'owner'})
 
     @api.route('/playlists/<int:playlist_id>', methods=['GET'])
     @requires_auth

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import {
   addToPlaylist, createPlaylist, deletePlaylist, fetchPlaylist, movePlaylistItem, playPlaylist,
-  removeFromPlaylist, renamePlaylist, type PlaylistDetail,
+  removeFromPlaylist, renamePlaylist, startImport, fetchImportJob, type ImportJob, type PlaylistDetail,
 } from '../api'
 import { useMe } from '../composables/useMe'
 import { formatTime, useStatus } from '../composables/useStatus'
@@ -99,6 +99,60 @@ async function play(mode: 'append' | 'next' | 'replace', opts: { shuffle?: boole
   }
 }
 
+// ---- 导入 YouTube / 网易云 / Spotify 歌单 ----
+const importOpen = ref(false)
+const importUrl = ref('')
+const importInto = ref<'new' | 'current'>('new')
+const importJob = ref<ImportJob | null>(null)
+const importError = ref('')
+const IMPORT_ERRORS: Record<string, string> = {
+  unsupported_source: 'Paste a YouTube playlist, NetEase Cloud Music playlist, or Spotify playlist/album link.',
+  spotify_not_configured: 'Spotify import needs [spotify] client_id / client_secret in configuration.ini.',
+  list_failed: "Couldn't read that playlist — is it public?",
+  no_entries: 'That playlist is empty (or private).',
+  too_many_playlists: 'You already have the maximum number of playlists.',
+}
+
+async function runImport() {
+  importError.value = ''
+  importJob.value = null
+  try {
+    const id = await startImport(importUrl.value.trim(),
+      importInto.value === 'current' && detail.value ? detail.value.id : undefined)
+    for (;;) {
+      const job = await fetchImportJob(id)
+      importJob.value = job
+      if (job.status === 'done' || job.status === 'error') break
+      await new Promise((r) => setTimeout(r, 1500))
+    }
+    const job = importJob.value!
+    if (job.status === 'error') {
+      importError.value = IMPORT_ERRORS[job.error ?? ''] ?? 'Import failed.'
+      return
+    }
+    importUrl.value = ''
+    await reloadPlaylists()
+    if (job.playlist_id) await select(job.playlist_id)
+    say(`Imported ${job.added} song${job.added === 1 ? '' : 's'}` +
+        (job.unmatched?.length ? ` · ${job.unmatched.length} not found on YouTube` : ''))
+  } catch (e) {
+    importError.value = IMPORT_ERRORS[e instanceof Error ? e.message : ''] ?? 'Import failed.'
+  }
+}
+
+const importRunning = computed(() => !!importJob.value && ['listing', 'matching'].includes(importJob.value.status))
+const importProgress = computed(() => {
+  const j = importJob.value
+  if (!j) return ''
+  if (j.status === 'listing') return 'Reading the playlist…'
+  if (j.status === 'matching') {
+    return j.source === 'youtube'
+      ? `Adding ${j.total} videos…`
+      : `Finding songs on YouTube… ${j.processed} / ${j.total}`
+  }
+  return ''
+})
+
 async function saveQueue() {
   if (!detail.value) return
   try {
@@ -166,6 +220,55 @@ const TYPE_LABEL: Record<string, string> = { url: 'Stream', file: 'Library', rad
             title="Create playlist"
           >＋</button>
         </form>
+        <button
+          class="mt-2 w-full cursor-pointer rounded-full border-0 px-4 py-2 text-xs font-medium"
+          :style="{ background: importOpen ? 'var(--c-accent-soft)' : 'var(--c-surface-2)', color: importOpen ? 'var(--c-accent)' : 'var(--c-text)' }"
+          @click="importOpen = !importOpen"
+        >⇣ Import a playlist</button>
+        <div v-if="importOpen" class="mt-2 rounded-xl p-3 text-xs"
+             :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
+          <form class="flex flex-col gap-2" @submit.prevent="runImport">
+            <input
+              v-model="importUrl"
+              type="url"
+              required
+              placeholder="Playlist link"
+              class="rounded-lg border px-3 py-1.5 text-xs outline-none"
+              :style="{ background: 'var(--c-bg)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
+              :disabled="importRunning"
+            />
+            <select
+              v-model="importInto"
+              class="rounded-lg border px-2 py-1.5 text-xs outline-none"
+              :style="{ background: 'var(--c-bg)', borderColor: 'var(--c-border)', color: 'var(--c-text)' }"
+              :disabled="importRunning"
+            >
+              <option value="new">Into a new playlist</option>
+              <option v-if="detail" value="current">Into "{{ detail.name }}"</option>
+            </select>
+            <button type="submit" class="cursor-pointer rounded-lg border-0 px-3 py-1.5 text-xs font-semibold"
+                    :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
+                    :disabled="importRunning || !importUrl.trim()">Import</button>
+          </form>
+          <p class="mt-2 leading-relaxed" :style="{ color: 'var(--c-text-faint)' }">
+            NetEase and Spotify songs are matched to YouTube by title, artist and length — NetEase audio is locked outside mainland China.
+          </p>
+          <template v-if="importJob && importRunning">
+            <p class="mt-2" :style="{ color: 'var(--c-text-muted)' }">{{ importProgress }}</p>
+            <div v-if="importJob.total" class="mt-1 h-1 w-full overflow-hidden rounded-full" :style="{ background: 'var(--c-surface-2)' }">
+              <div class="h-full rounded-full" :style="{ width: `${(importJob.processed / importJob.total) * 100}%`, background: 'var(--c-accent)', transition: 'width 400ms' }" />
+            </div>
+          </template>
+          <p v-if="importError" class="mt-2" :style="{ color: 'var(--c-danger)' }">{{ importError }}</p>
+          <details v-if="importJob?.status === 'done' && importJob.unmatched?.length" class="mt-2">
+            <summary class="cursor-pointer" :style="{ color: 'var(--c-text-muted)' }">
+              {{ importJob.unmatched.length }} not found on YouTube
+            </summary>
+            <ul class="mt-1 max-h-32 overflow-y-auto pl-3" :style="{ color: 'var(--c-text-faint)' }">
+              <li v-for="u in importJob.unmatched" :key="u" class="truncate">{{ u }}</li>
+            </ul>
+          </details>
+        </div>
         <ul class="mt-3 flex flex-col gap-1">
           <li v-for="pl in playlists" :key="pl.id">
             <button

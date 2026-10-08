@@ -30,6 +30,8 @@ def overview():
             'follow': settings['follow'],
             'follow_user': settings['follow_user'],
             'return_home': settings['return_home'],
+            'idle_pause_minutes': settings['idle_pause_minutes'],
+            'idle_resume': settings['idle_resume'],
         },
         'online_users': humans,
     }
@@ -67,6 +69,16 @@ def create_blueprint(requires_auth):
             changes['follow_user'] = name
         if 'return_home' in payload:
             changes['return_home'] = bool(payload['return_home'])
+        if 'idle_pause_minutes' in payload:
+            try:
+                minutes = int(payload['idle_pause_minutes'])
+            except (TypeError, ValueError):
+                abort(400)
+            if not 0 <= minutes <= 24 * 60:
+                abort(400)
+            changes['idle_pause_minutes'] = minutes
+        if 'idle_resume' in payload:
+            changes['idle_resume'] = bool(payload['idle_resume'])
         if not changes:
             abort(400)
         var.bot.save_channel_settings(**changes)

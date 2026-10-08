@@ -68,11 +68,17 @@ from .volume import (
     cmd_max_volume,
     cmd_volume,
 )
+from .personal import cmd_bind, cmd_favorite, cmd_my_playlist, cmd_unbind
 from .web import cmd_user_password, cmd_web_access, cmd_web_user_add, cmd_web_user_list, cmd_web_user_remove
 
 
 def register_all_commands(bot):
     bot.register_command(commands('add_from_shortlist'), cmd_shortlist)
+    # 绑定命令在私聊里用,不要求和 bot 在同一频道
+    bot.register_command(commands('bind'), cmd_bind, no_partial_match=True, access_outside_channel=True)
+    bot.register_command(commands('unbind'), cmd_unbind, no_partial_match=True, access_outside_channel=True)
+    bot.register_command(commands('my_playlist'), cmd_my_playlist)
+    bot.register_command(commands('favorite'), cmd_favorite)
     bot.register_command(commands('add_tag'), cmd_add_tag)
     bot.register_command(commands('change_user_password'), cmd_user_password, no_partial_match=True)
     bot.register_command(commands('clear'), cmd_clear)

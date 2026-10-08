@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { saveAlias } from '../api'
+import { createBindCode, fetchMe, saveAlias, unbindMumble } from '../api'
 import { useMe } from '../composables/useMe'
 
 const { me } = useMe()
@@ -39,6 +39,56 @@ async function save(alias: string) {
     saving.value = false
   }
 }
+
+// ---- Mumble 绑定:生成一次性码,等用户在 Mumble 里发 !bind ----
+const bind = ref<{ code: string; command: string; expires_at: number } | null>(null)
+const bindMsg = ref('')
+const copied = ref(false)
+let bindPoll: ReturnType<typeof setInterval> | undefined
+
+async function startBind() {
+  bindMsg.value = ''
+  try {
+    bind.value = await createBindCode()
+    clearInterval(bindPoll)
+    bindPoll = setInterval(async () => {
+      if (!bind.value || Date.now() / 1000 > bind.value.expires_at) {
+        clearInterval(bindPoll)
+        if (bind.value) bindMsg.value = 'Code expired — generate a new one.'
+        bind.value = null
+        return
+      }
+      try {
+        const fresh = await fetchMe()
+        if (fresh.mumble) {
+          me.value = fresh
+          bind.value = null
+          bindMsg.value = `Linked to ${fresh.mumble.mumble_name} ✓`
+          clearInterval(bindPoll)
+        }
+      } catch { /* 下一轮再试 */ }
+    }, 3000)
+  } catch {
+    bindMsg.value = 'Could not create a code.'
+  }
+}
+
+async function copyCommand() {
+  if (!bind.value) return
+  try {
+    await navigator.clipboard.writeText(bind.value.command)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch { /* 不支持剪贴板就手动抄 */ }
+}
+
+async function unlink() {
+  if (!confirm('Unlink your Mumble account?')) return
+  me.value = await unbindMumble()
+  bindMsg.value = 'Unlinked.'
+}
+
+onBeforeUnmount(() => clearInterval(bindPoll))
 
 function onDocClick(e: MouseEvent) {
   if (open.value && root.value && !root.value.contains(e.target as Node)) open.value = false
@@ -112,6 +162,38 @@ const SOURCE_LABEL: Record<string, string> = {
             :style="{ color: 'var(--c-text-muted)' }"
             @click="save('')"
           >Clear alias</button>
+        </div>
+
+        <!-- Mumble 账号绑定 -->
+        <div class="mt-4 border-t pt-3" :style="{ borderColor: 'var(--c-border)' }">
+          <p class="text-xs font-medium" :style="{ color: 'var(--c-text-muted)' }">Mumble account</p>
+          <template v-if="me?.mumble">
+            <div class="mt-1 flex items-center justify-between">
+              <span class="text-sm">🎧 {{ me.mumble.mumble_name }}</span>
+              <button class="cursor-pointer border-0 bg-transparent p-0 text-xs underline"
+                      :style="{ color: 'var(--c-text-muted)' }" @click="unlink">Unlink</button>
+            </div>
+            <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
+              In Mumble: <b>!mylist</b> lists your playlists, <b>!fav</b> saves the current song.
+            </p>
+          </template>
+          <template v-else-if="bind">
+            <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">Send this to the bot in Mumble (a private message works best):</p>
+            <button
+              class="mt-1.5 flex w-full cursor-pointer items-center justify-between rounded-lg border-0 px-3 py-2 font-mono text-base tracking-wider"
+              :style="{ background: 'var(--c-bg)', color: 'var(--c-text)' }"
+              title="Copy"
+              @click="copyCommand"
+            >{{ bind.command }}<span class="font-sans text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ copied ? 'Copied ✓' : 'Copy' }}</span></button>
+            <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">Valid for 10 minutes · waiting for you…</p>
+          </template>
+          <button
+            v-else
+            class="mt-1.5 w-full cursor-pointer rounded-lg border-0 px-3 py-1.5 text-xs font-medium"
+            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
+            @click="startBind"
+          >Link Mumble account</button>
+          <p v-if="bindMsg" class="mt-1 text-xs" :style="{ color: bindMsg.includes('✓') ? 'var(--c-success)' : 'var(--c-text-muted)' }">{{ bindMsg }}</p>
         </div>
       </template>
       <template v-else>

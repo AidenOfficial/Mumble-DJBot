@@ -8,6 +8,7 @@ import time
 
 import variables as var
 from constants import tr_cli as tr
+from media import sponsorblock
 from media.item import ValidationFailedError, PreparationFailedError
 
 
@@ -66,6 +67,71 @@ class PlayerMixin:
     # =======================
     #   Launch and Download
     # =======================
+
+    # =======================
+    #   SponsorBlock
+    # =======================
+
+    def _sponsorblock_categories(self):
+        if not var.config.getboolean('bot', 'sponsorblock', fallback=False):
+            return []
+        raw = var.config.get('bot', 'sponsorblock_categories', fallback='music_offtopic')
+        return [c.strip() for c in raw.split(',') if c.strip()]
+
+    def _sponsorblock_prefetch(self, wrapper):
+        """后台查询这首歌要跳过的片段(结果按条目 id 缓存,重播/续播复用)。"""
+        categories = self._sponsorblock_categories()
+        if not categories:
+            return
+        if not hasattr(self, '_sb_segments'):
+            self._sb_segments = {}
+        try:
+            item = wrapper.item() if hasattr(wrapper, 'item') else wrapper
+            url = getattr(item, 'url', '')
+            item_id = item.id
+        except Exception:
+            return
+        if getattr(item, 'type', '') not in ('url', 'url_from_playlist') or not url:
+            return
+        if item_id in self._sb_segments:
+            return
+        self._sb_segments[item_id] = None  # 查询中
+
+        def run():
+            self._sb_segments[item_id] = sponsorblock.fetch_segments(url, categories)
+
+        threading.Thread(target=run, name="SponsorBlock-" + item_id[:7], daemon=True).start()
+
+    def skip_segments_for(self, item_id):
+        return (getattr(self, '_sb_segments', {}) or {}).get(item_id) or []
+
+    def _sponsorblock_skip(self):
+        """当前播放位置落在要跳过的片段里:杀掉 ffmpeg,从片段结尾静默重启;
+        片段一直到曲尾的话直接切下一首。返回 True 表示这一轮已处理。"""
+        segments = self.skip_segments_for(getattr(self, '_playing_id', None))
+        if not segments:
+            return False
+        hit = sponsorblock.segment_at(segments, self.playhead)
+        if not hit:
+            return False
+        start, end = hit
+        try:
+            self.thread.kill()
+        except Exception:
+            pass
+        self.thread = None
+        self.read_pcm_size = 0
+        duration = getattr(self, '_playing_duration', 0) or 0
+        if duration and end >= duration - 1.5:
+            self.log.info("bot: sponsorblock skipped %.0fs-end, moving on", start)
+            self.wait_for_ready = False  # 下一轮主循环会切到下一首
+        else:
+            self.log.info("bot: sponsorblock skipped %.0fs-%.0fs", start, end)
+            self.playhead = end
+            self.song_start_at = -1
+            self.wait_for_ready = True
+            self._quiet_relaunch = True
+        return True
 
     def _stream_enabled(self):
         return var.config.getboolean('bot', 'stream_while_downloading', fallback=False)
@@ -144,6 +210,15 @@ class PlayerMixin:
         uri = music_wrapper.uri()
 
         self.log.info("bot: play music " + music_wrapper.format_debug_string())
+        self._playing_id = getattr(music_wrapper, 'id', None)
+        try:
+            self._playing_duration = getattr(music_wrapper.item(), 'duration', 0) or 0
+        except Exception:
+            self._playing_duration = 0
+        self._sponsorblock_prefetch(music_wrapper)
+        # 跳过 SponsorBlock 片段时的重启不算新的一首:不播报、不计入统计
+        quiet = getattr(self, '_quiet_relaunch', False)
+        self._quiet_relaunch = False
 
         # Statistics: one history row per playback start (a start_from > 0
         # is a resume or a stream-while-downloading relaunch, not a play;
@@ -160,7 +235,7 @@ class PlayerMixin:
             except Exception:
                 self.log.debug("bot: could not record play history", exc_info=True)
 
-        if var.config.getboolean('bot', 'announce_current_music'):
+        if var.config.getboolean('bot', 'announce_current_music') and not quiet:
             self.send_channel_msg(music_wrapper.format_current_playing())
 
         if var.config.getboolean('debug', 'ffmpeg'):
@@ -318,6 +393,7 @@ class PlayerMixin:
             ver = item.version
             try:
                 item.validate()
+                self._sponsorblock_prefetch(item)
                 if item.is_ready():
                     return True
             except ValidationFailedError as e:
@@ -434,6 +510,12 @@ class PlayerMixin:
             self._write_heartbeat()
             self._autosave_playlist()
             try:
+                idle_tick = getattr(self, 'idle_tick', None)
+                if idle_tick:
+                    idle_tick()
+            except Exception:
+                self.log.debug("bot: idle check failed", exc_info=True)
+            try:
                 self._loop_iteration()
             except Exception:
                 # A failure while playing one item must never take the whole bot
@@ -509,6 +591,9 @@ class PlayerMixin:
             if self.song_start_at == -1:
                 self.song_start_at = time.time() - self.playhead
             self.playhead = time.time() - self.song_start_at
+
+            if not self.on_interrupting and self._sponsorblock_skip():
+                return
 
             raw_music = self.thread.stdout.read(self.pcm_buffer_size)
             # Capture whether this is the very first chunk of the song *before*
@@ -597,6 +682,7 @@ class PlayerMixin:
             if not self.wait_for_ready:  # if wait_for_ready flag is not true, move to the next song.
                 if var.playlist.next():
                     current = var.playlist.current_item()
+                    self._quiet_relaunch = False  # 换了新歌,跳片段留下的静默标记作废
                     self.log.debug(f"bot: next into the song: {current.format_debug_string()}")
                     try:
                         self.start_download(current)
@@ -725,6 +811,7 @@ class PlayerMixin:
     def play(self, index=-1, start_at=0):
         if not self.is_pause:
             self.interrupt()
+        self._quiet_relaunch = False
 
         if index != -1:
             var.playlist.point_to(index)

@@ -253,3 +253,97 @@ class ApiTest(Base):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class IdleBot(Bot):
+    def __init__(self):
+        super().__init__()
+        self.is_pause = False
+        self.calls = []
+
+    def pause(self):
+        self.calls.append('pause')
+        self.is_pause = True
+
+    def resume(self):
+        self.calls.append('resume')
+        self.is_pause = False
+
+
+class IdlePauseTest(Base):
+    def setUp(self):
+        super().setUp()
+        self.bot = IdleBot()
+        self.bot.schedule_follow_check = lambda delay=0: None
+        self._saved_playlist = var.playlist
+        var.playlist = ['song']
+        self.t = 1000.0
+
+    def tearDown(self):
+        var.playlist = self._saved_playlist
+        super().tearDown()
+
+    def tick(self, advance):
+        self.t += advance
+        self.bot.idle_tick(now=self.t)
+
+    def test_pauses_after_five_empty_minutes_and_resumes_when_someone_returns(self):
+        b = self.bot
+        self.tick(0)
+        self.tick(299)
+        self.assertEqual(b.calls, [])            # 还不到 5 分钟
+        self.tick(2)
+        self.assertEqual(b.calls, ['pause'])
+        self.tick(60)
+        self.assertEqual(b.calls, ['pause'])     # 不会重复暂停
+        b.mumble.users.add(2, 'alice', 3)        # 有人回到 bot 所在频道
+        self.tick(3)
+        self.assertEqual(b.calls, ['pause', 'resume'])
+
+    def test_someone_present_never_pauses(self):
+        self.bot.mumble.users.add(2, 'alice', 3)
+        for _ in range(10):
+            self.tick(100)
+        self.assertEqual(self.bot.calls, [])
+
+    def test_manual_pause_is_not_auto_resumed(self):
+        b = self.bot
+        b.is_pause = True                        # 有人手动暂停
+        self.tick(0)
+        self.tick(400)
+        b.mumble.users.add(2, 'alice', 3)
+        self.tick(3)
+        self.assertEqual(b.calls, [])
+
+    def test_manual_resume_restarts_the_timer(self):
+        b = self.bot
+        self.tick(0)
+        self.tick(301)
+        self.assertEqual(b.calls, ['pause'])
+        b.is_pause = False                       # 没人也手动点了继续
+        self.tick(3)
+        self.tick(200)
+        self.assertEqual(b.calls, ['pause'])     # 重新计时,没马上又停
+        self.tick(110)
+        self.assertEqual(b.calls, ['pause', 'pause'])
+
+    def test_disabled_and_resume_toggle(self):
+        b = self.bot
+        b.save_channel_settings(idle_pause_minutes=0)
+        self.tick(0)
+        self.tick(3600)
+        self.assertEqual(b.calls, [])
+        b.save_channel_settings(idle_pause_minutes=1, idle_resume=False)
+        self.tick(61)
+        self.assertEqual(b.calls, ['pause'])
+        b.mumble.users.add(2, 'alice', 3)
+        self.tick(3)
+        self.assertEqual(b.calls, ['pause'])     # 关了自动继续
+
+    def test_follow_takes_priority_over_pausing(self):
+        b = self.bot
+        b.save_channel_settings(follow='auto')
+        b.mumble.users.add(2, 'alice', 1)        # 别的频道有人:应该跟过去而不是暂停
+        self.tick(0)
+        self.tick(400)
+        self.assertEqual(b.calls, [])

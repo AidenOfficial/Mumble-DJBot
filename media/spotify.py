@@ -209,7 +209,7 @@ def list_spotify_tracks(url):
     downloading any audio, using `spotdl save`.
 
     Returns a list of dicts, each with 'url' (the track's own Spotify URL),
-    'name' and 'artist'. Raises SpotifyError on failure; returns an empty
+    'name', 'artist' and 'duration' (seconds, 0 if unknown). Raises SpotifyError on failure; returns an empty
     list when spotdl ran cleanly but found nothing.
     """
     client_id = var.config.get('spotify', 'client_id', fallback='').strip()
@@ -260,6 +260,7 @@ def list_spotify_tracks(url):
                 'url': track_url,
                 'name': song.get('name', '') or '',
                 'artist': song.get('artist', '') or '',
+                'duration': song.get('duration') or 0,
             })
         log.info("spotify: %s resolved to %d track(s)" % (url, len(tracks)))
         return tracks

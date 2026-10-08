@@ -62,6 +62,9 @@ def _status_payload():
         try:
             payload['current'] = _item_summary(
                 current, var.playlist.current_index)
+            # SponsorBlock 要跳过的片段,前端在进度条上标出来
+            skip_for = getattr(bot, 'skip_segments_for', None)
+            payload['current']['skip_segments'] = skip_for(current.id) if skip_for else []
         except Exception:
             # an item mid-eviction must not break the poll
             payload['current'] = None
@@ -298,7 +301,17 @@ def create_blueprint(requires_auth):
     def api_stats():
         if var.play_history is None:
             abort(503)
-        return jsonify(var.play_history.stats())
+        stats = var.play_history.stats()
+        if var.user_db is not None:
+            # 绑定了 Mumble 的人:聊天点歌(记的是 Mumble 名)和网页点歌(记的是别名)合并成一行
+            names = var.user_db.requester_display_names()
+            merged = {}
+            for row in stats.get('top_users', []):
+                name = names.get(row['user'], row['user'])
+                merged[name] = merged.get(name, 0) + row['count']
+            stats['top_users'] = [{'user': u, 'count': c}
+                                  for u, c in sorted(merged.items(), key=lambda kv: -kv[1])]
+        return jsonify(stats)
 
     @api.route('/thumbnail/<item_id>', methods=['GET'])
     @requires_auth

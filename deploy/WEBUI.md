@@ -91,6 +91,42 @@ access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
 - 开着跟随时,`when_nobody_in_channel = pause/stop` 不会在 bot 即将跟过去时误暂停/清空队列。
 - bot 需要有进入目标频道的权限(Mumble ACL),没权限的频道服务器会拒绝移动。
 
+## 没人时自动暂停(Settings 页)
+
+- bot 所在频道连续没人(其他 bot 不算)达到设定分钟数就暂停,默认 5 分钟,0 = 关闭。
+- 默认有人回到频道就自动继续;只恢复它自己暂停的,不会替人恢复手动暂停。
+- 开着跟随模式时优先跟过去,不会暂停。
+- 与 ini 里的 `when_nobody_in_channel`(立即暂停/停止)相互独立,一般保持那个为 `nothing` 即可。
+
+## 跳过非音乐片段(SponsorBlock)
+
+- YouTube / B 站视频播放时自动跳过社区标注的片段:MV 片头片尾的说话、赞助口播、求三连等。
+- Now Playing 的进度条上用斜纹标出会被跳过的位置。
+- 配置见 `configuration.example.ini` 的 `sponsorblock` / `sponsorblock_categories`。
+- B 站多 P 视频的片段对应不到具体是哪一 P,这种情况不跳。
+
+## 导入歌单(Playlists 页 → Import a playlist)
+
+- 支持 YouTube 播放列表、网易云音乐歌单、Spotify 歌单/专辑,可以导入成新歌单或追加到当前歌单。
+- 网易云在海外基本没有音源,Spotify 本身不提供音频,所以这两个只读歌名/歌手/时长,
+  再去 YouTube 按"时长接近 + 官方频道优先 + 排除翻唱/现场/AMV"挑最像的一个。
+  找不到的会列出来。导入几百首大约要一两分钟,页面上有进度。
+- Spotify 需要 `[spotify] client_id / client_secret`(和 `!spotify` 命令用的是同一套)。
+
+## 绑定 Mumble 账号
+
+- 网页右上角头像 → **Link Mumble account**,生成 6 位绑定码(10 分钟有效),
+  在 Mumble 里私聊 bot 发 `!bind 123456`。
+- 绑定后在聊天里:
+  - `!mylist`:列出我的歌单;
+  - `!mylist 名字或序号 [shuffle]`:把歌单加入播放队列;
+  - `!fav [歌单名]`:把当前这首加入歌单(默认 Favorites,没有就自动建);
+  - `!unbind`:解除绑定。
+- 还没设别名的话,绑定时自动用 Mumble 名当别名;统计页会把同一个人在聊天和网页上的点歌合并成一行。
+- Mumble 账号的识别优先级:服务器注册用户 ID > 客户端证书指纹 > 用户名。
+  没注册的用户换了客户端证书就需要重新绑定。
+- 绑定码输错 5 次锁 10 分钟。
+
 ## 缓存与上传
 
 - **Cache** 页:下载缓存占用、每首的大小/播放次数/最后使用时间。📌 固定 = 自动清理永不删除;

@@ -8,6 +8,8 @@
               user  始终跟着 follow_user 指定的用户
   follow_user   user 模式下跟随的用户名
   return_home   服务器上一个人都没有时回到默认频道(1/0)
+  idle_pause_minutes  bot 所在频道连续没人这么多分钟就自动暂停(0 = 关,默认 5)
+  idle_resume         自动暂停后有人回来就自动继续播放(1/0,默认 1)
 
 pymumble 的回调在它自己的线程里、持着 users.lock 调用,所以这里只记录事件,
 真正的决策放到防抖定时器线程里做(人在频道间来回切时不会被带着乱跑)。
@@ -50,9 +52,19 @@ class ChannelMixin:
             'follow': mode if mode in FOLLOW_MODES else 'off',
             'follow_user': var.db.get(SECTION, 'follow_user', fallback=''),
             'return_home': var.db.get(SECTION, 'return_home', fallback='1') == '1',
+            'idle_pause_minutes': self._idle_minutes(),
+            'idle_resume': var.db.get(SECTION, 'idle_resume', fallback='1') == '1',
         }
 
-    def save_channel_settings(self, default=None, follow=None, follow_user=None, return_home=None):
+    @staticmethod
+    def _idle_minutes():
+        try:
+            return max(0, int(var.db.get(SECTION, 'idle_pause_minutes', fallback='5')))
+        except ValueError:
+            return 5
+
+    def save_channel_settings(self, default=None, follow=None, follow_user=None, return_home=None,
+                              idle_pause_minutes=None, idle_resume=None):
         if default is not None:
             var.db.set(SECTION, 'default', json.dumps(list(default), ensure_ascii=False))
         if follow is not None:
@@ -63,6 +75,10 @@ class ChannelMixin:
             var.db.set(SECTION, 'follow_user', follow_user)
         if return_home is not None:
             var.db.set(SECTION, 'return_home', '1' if return_home else '0')
+        if idle_pause_minutes is not None:
+            var.db.set(SECTION, 'idle_pause_minutes', str(max(0, int(idle_pause_minutes))))
+        if idle_resume is not None:
+            var.db.set(SECTION, 'idle_resume', '1' if idle_resume else '0')
         self.schedule_follow_check(delay=0.2)
 
     # ---- 频道树 -----------------------------------------------------------
@@ -267,3 +283,50 @@ class ChannelMixin:
             return self.follow_target() is not None
         except Exception:
             return False
+
+    # ---- 无人自动暂停 -------------------------------------------------------
+
+    def idle_tick(self, now=None):
+        """主循环里调用(内部节流到每 2 秒一次)。频道连续没人 N 分钟 -> 暂停;
+        自动暂停后有人回来 -> 继续。只恢复自己暂停的,不会替人恢复手动暂停。"""
+        now = now if now is not None else time.time()
+        if now - getattr(self, '_idle_last_tick', 0.0) < 2:
+            return
+        self._idle_last_tick = now
+        try:
+            self._idle_check(now)
+        finally:
+            # 在最后记录:本轮自己调用的 pause()/resume() 也要算进"上一轮的状态"
+            self._idle_was_paused = self.is_pause
+
+    def _idle_check(self, now):
+        settings = self.channel_settings()
+        mine = self.my_channel_id()
+        if mine is None:
+            return
+        humans = self.humans_by_channel().get(mine)
+
+        if not self.is_pause:
+            if getattr(self, '_idle_paused', False):
+                self._idle_paused = False  # 有人手动恢复了
+            if getattr(self, '_idle_was_paused', False):
+                self._empty_since = now   # 刚从暂停恢复,重新计时
+
+        if humans:
+            self._empty_since = None
+            if getattr(self, '_idle_paused', False):
+                self._idle_paused = False
+                if settings['idle_resume'] and self.is_pause:
+                    log.info("channel: someone is back, resuming playback")
+                    self.resume()
+            return
+
+        if getattr(self, '_empty_since', None) is None:
+            self._empty_since = now
+        minutes = settings['idle_pause_minutes']
+        if minutes <= 0 or self.is_pause or len(var.playlist) == 0:
+            return
+        if now - self._empty_since >= minutes * 60 and not self.follow_would_move():
+            log.info("channel: nobody here for %d min, pausing playback", minutes)
+            self.pause()
+            self._idle_paused = True

@@ -9,6 +9,8 @@ export interface CurrentItem {
   url: string
   duration: number
   has_thumbnail: boolean
+  /** SponsorBlock 会跳过的片段 [开始, 结束](秒),只有当前曲有 */
+  skip_segments?: [number, number][]
 }
 
 export interface QueueItem extends CurrentItem {
@@ -86,6 +88,7 @@ export interface Me {
   source: 'cloudflare' | 'cloudflare-jwt' | 'web-user' | 'anonymous'
   can_have_playlists: boolean
   jwt_verified?: boolean
+  mumble: { mumble_name: string; linked_at: number } | null
 }
 
 export const fetchMe = () => getJson<Me>('/api/me')
@@ -252,6 +255,8 @@ export interface ChannelOverview {
     follow: FollowMode
     follow_user: string
     return_home: boolean
+    idle_pause_minutes: number
+    idle_resume: boolean
   }
   online_users: string[]
 }
@@ -259,6 +264,41 @@ export interface ChannelOverview {
 export const fetchChannels = () => getJson<ChannelOverview>('/api/channels')
 export const saveChannelSettings = (body: Partial<{
   default_channel_id: number; follow: FollowMode; follow_user: string; return_home: boolean
+  idle_pause_minutes: number; idle_resume: boolean
 }>) => send<ChannelOverview>('POST', '/api/channels/settings', body)
 export const joinChannel = (channel_id: number) =>
   send<ChannelOverview>('POST', '/api/channels/join', { channel_id })
+
+// ---- Mumble 绑定 ---------------------------------------------------------
+
+export const createBindCode = () =>
+  send<{ code: string; expires_at: number; command: string }>('POST', '/api/me/bind')
+export const unbindMumble = () => send<Me>('DELETE', '/api/me/bind')
+
+// ---- 导入歌单 -----------------------------------------------------------
+
+export interface ImportJob {
+  id: string
+  status: 'listing' | 'matching' | 'done' | 'error'
+  source: 'youtube' | 'netease' | 'spotify'
+  total: number
+  processed: number
+  matched: number
+  added?: number
+  playlist_id?: number
+  source_title?: string
+  unmatched?: string[]
+  error?: string
+}
+
+export async function startImport(url: string, playlistId?: number): Promise<string> {
+  const rv = await fetch(`${BASE}/api/playlists/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(playlistId ? { url, playlist_id: playlistId } : { url }),
+  })
+  const body = await rv.json().catch(() => ({}))
+  if (!rv.ok) throw new Error(body.error ?? String(rv.status))
+  return body.job_id
+}
+export const fetchImportJob = (id: string) => getJson<ImportJob>(`/api/playlists/import/${id}`)

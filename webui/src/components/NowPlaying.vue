@@ -20,6 +20,14 @@ watch(
   { immediate: true },
 )
 
+const skipBlocks = computed(() => {
+  const d = current.value?.duration || 0
+  if (!d) return []
+  return (current.value?.skip_segments ?? []).map(([start, end]) => ({
+    start, end, left: (start / d) * 100, width: (Math.min(end, d) - start) / d * 100,
+  }))
+})
+
 const sourceLabel = computed(() => {
   const t = current.value?.type ?? ''
   const labels: Record<string, string> = {
@@ -96,10 +104,23 @@ const sourceLabel = computed(() => {
           :style="{ width: `${progress * 100}%`, background: 'var(--c-accent)', transition: 'width 200ms linear' }"
         />
       </div>
+      <!-- SponsorBlock 会跳过的片段 -->
+      <div v-if="skipBlocks.length" class="relative -mt-1.5 h-1.5 w-full" aria-hidden="true">
+        <div
+          v-for="(b, i) in skipBlocks"
+          :key="i"
+          class="absolute inset-y-0 rounded-full"
+          :style="{ left: `${b.left}%`, width: `${b.width}%`, background: 'repeating-linear-gradient(135deg, var(--c-text-faint) 0 3px, transparent 3px 6px)', opacity: 0.7 }"
+          :title="`Skipped: ${formatTime(b.start)}–${formatTime(b.end)}`"
+        />
+      </div>
       <div class="mt-1.5 flex justify-between text-xs tabular-nums" :style="{ color: 'var(--c-text-muted)' }">
         <span>{{ formatTime(clock.playhead) }}</span>
         <span>{{ current.duration ? formatTime(current.duration) : '--:--' }}</span>
       </div>
+      <p v-if="skipBlocks.length" class="mt-1 text-center text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
+        ⏭ Skipping {{ skipBlocks.length }} non-music part{{ skipBlocks.length === 1 ? '' : 's' }} (SponsorBlock)
+      </p>
     </div>
 
     <!-- controls -->
