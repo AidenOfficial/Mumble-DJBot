@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  addToPlaylist, createPlaylist, deletePlaylist, fetchPlaylist, movePlaylistItem, playPlaylist,
-  removeFromPlaylist, renamePlaylist, startImport, fetchImportJob, type ImportJob, type PlaylistDetail,
+  addToPlaylist, copyPlaylist, createPlaylist, deletePlaylist, fetchPlaylist, fetchPublicPlaylists,
+  movePlaylistItem, playPlaylist, removeFromPlaylist, renamePlaylist, setPlaylistPublic, startImport,
+  fetchImportJob, type ImportJob, type PlaylistDetail, type PlaylistSummary,
 } from '../api'
+import AddToPlaylist from './AddToPlaylist.vue'
 import { useMe } from '../composables/useMe'
 import { formatTime, useStatus } from '../composables/useStatus'
 import { t, typeLabel } from '../i18n'
@@ -30,11 +32,31 @@ function say(msg: string) {
 }
 
 watch(() => me.value?.can_have_playlists, (ok) => { if (ok) reloadPlaylists() }, { immediate: true })
+const signedIn = computed(() => !!me.value?.can_have_playlists)
 
-// 默认选中第一个歌单
-watch(playlists, (list) => {
-  if (selectedId.value === null && list.length) select(list[0]!.id)
-  if (selectedId.value !== null && !list.some((p) => p.id === selectedId.value)) {
+// 别人公开的歌单(访客也能看、能播放)
+const shared = ref<PlaylistSummary[]>([])
+async function loadShared() {
+  try {
+    shared.value = await fetchPublicPlaylists()
+  } catch { /* 状态轮询那边会提示连接错误 */ }
+}
+let sharedTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  loadShared()
+  sharedTimer = setInterval(loadShared, 60000)
+})
+onBeforeUnmount(() => clearInterval(sharedTimer))
+
+// 默认选中:自己的第一个,没有就选大家的第一个
+watch([playlists, shared], ([mine, others]) => {
+  if (selectedId.value === null) {
+    const first = mine[0] ?? others[0]
+    if (first) select(first.id)
+    return
+  }
+  // 自己的歌单在别处被删了
+  if (detail.value?.mine && !mine.some((p) => p.id === selectedId.value)) {
     selectedId.value = null
     detail.value = null
   }
@@ -46,7 +68,38 @@ async function select(id: number) {
   try {
     detail.value = await fetchPlaylist(id)
   } catch {
+    // 别人刚把它改回私人 / 删掉了
+    const wasShared = shared.value.some((p) => p.id === id)
     detail.value = null
+    selectedId.value = null
+    if (wasShared) {
+      say(t('pl.noLongerShared'))
+      loadShared()
+    }
+  }
+}
+
+async function togglePublic() {
+  if (!detail.value?.mine) return
+  try {
+    const next = !detail.value.public
+    detail.value = await setPlaylistPublic(detail.value.id, next)
+    say(t(next ? 'pl.nowPublic' : 'pl.nowPrivate'))
+    reloadPlaylists()
+  } catch {
+    say(t('common.saveFailed'))
+  }
+}
+
+async function copyToMine() {
+  if (!detail.value || detail.value.mine) return
+  try {
+    const pl = await copyPlaylist(detail.value.id)
+    await reloadPlaylists()
+    await select(pl.id)
+    say(t('pl.copied', { name: pl.name }))
+  } catch (e) {
+    say(e instanceof Error && e.message.endsWith('409') ? t('import.too_many_playlists') : t('pl.copyFailed'))
   }
 }
 
@@ -191,7 +244,8 @@ const totalDuration = computed(() =>
 
 <template>
   <section class="mx-auto w-full max-w-5xl px-4 py-8">
-    <div v-if="me && !me.can_have_playlists" class="mx-auto max-w-md rounded-2xl p-6 text-center"
+    <!-- 访客、也没有任何公开歌单:只解释为什么空 -->
+    <div v-if="me && !signedIn && !shared.length" class="mx-auto max-w-md rounded-2xl p-6 text-center"
          :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
       <p class="font-semibold">{{ t('pl.needSignIn') }}</p>
       <p class="mt-2 text-sm" :style="{ color: 'var(--c-text-muted)' }">{{ t('pl.needSignInHint') }}</p>
@@ -200,6 +254,12 @@ const totalDuration = computed(() =>
     <div v-else class="grid gap-6 md:grid-cols-[16rem_1fr]">
       <!-- 歌单列表 -->
       <aside>
+        <div v-if="!signedIn" class="rounded-xl p-3 text-xs leading-relaxed"
+             :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)', color: 'var(--c-text-muted)' }">
+          <p class="font-semibold" :style="{ color: 'var(--c-text)' }">{{ t('pl.needSignIn') }}</p>
+          <p class="mt-1">{{ t('pl.guestShared') }}</p>
+        </div>
+        <template v-else>
         <form class="flex gap-2" @submit.prevent="create">
           <input
             v-model="newName"
@@ -239,7 +299,7 @@ const totalDuration = computed(() =>
               :disabled="importRunning"
             >
               <option value="new">{{ t('pl.importNew') }}</option>
-              <option v-if="detail" value="current">{{ t('pl.importInto', { name: detail.name }) }}</option>
+              <option v-if="detail?.mine" value="current">{{ t('pl.importInto', { name: detail.name }) }}</option>
             </select>
             <button type="submit" class="cursor-pointer rounded-lg border-0 px-3 py-1.5 text-xs font-semibold"
                     :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
@@ -264,7 +324,10 @@ const totalDuration = computed(() =>
             </ul>
           </details>
         </div>
-        <ul class="mt-3 flex flex-col gap-1">
+        <h2 class="mt-5 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider" :style="{ color: 'var(--c-text-faint)' }">
+          {{ t('pl.mine') }}
+        </h2>
+        <ul class="flex flex-col gap-1">
           <li v-for="pl in playlists" :key="pl.id">
             <button
               class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border-0 px-3 py-2.5 text-left"
@@ -274,12 +337,42 @@ const totalDuration = computed(() =>
               @click="select(pl.id)"
             >
               <span class="truncate text-sm font-medium">{{ pl.name }}</span>
-              <span class="shrink-0 text-xs tabular-nums" :style="{ color: 'var(--c-text-faint)' }">{{ pl.count }}</span>
+              <span class="flex shrink-0 items-center gap-1.5 text-xs tabular-nums" :style="{ color: 'var(--c-text-faint)' }">
+                <span v-if="pl.public" :title="t('pl.publicBadge')" aria-hidden="true">🌐</span>{{ pl.count }}
+              </span>
             </button>
           </li>
         </ul>
-        <p v-if="!playlists.length" class="mt-4 text-sm" :style="{ color: 'var(--c-text-faint)' }">
+        <p v-if="!playlists.length" class="mt-1 px-3 text-sm" :style="{ color: 'var(--c-text-faint)' }">
           {{ t('pl.noneYet') }}
+        </p>
+        </template>
+
+        <!-- 大家公开的歌单 -->
+        <template v-if="shared.length">
+          <h2 class="mt-5 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider" :style="{ color: 'var(--c-text-faint)' }">
+            {{ t('pl.shared') }}
+          </h2>
+          <ul class="flex flex-col gap-1">
+            <li v-for="pl in shared" :key="pl.id">
+              <button
+                class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border-0 px-3 py-2 text-left"
+                :style="pl.id === selectedId
+                  ? { background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }
+                  : { background: 'transparent', color: 'var(--c-text)' }"
+                @click="select(pl.id)"
+              >
+                <span class="min-w-0">
+                  <span class="block truncate text-sm font-medium">{{ pl.name }}</span>
+                  <span class="block truncate text-[11px]" :style="{ color: 'var(--c-text-muted)' }">{{ pl.owner_name }}</span>
+                </span>
+                <span class="shrink-0 text-xs tabular-nums" :style="{ color: 'var(--c-text-faint)' }">{{ pl.count }}</span>
+              </button>
+            </li>
+          </ul>
+        </template>
+        <p v-else-if="signedIn" class="mt-5 px-3 text-xs leading-relaxed" :style="{ color: 'var(--c-text-faint)' }">
+          {{ t('pl.sharedNone') }}
         </p>
       </aside>
 
@@ -299,14 +392,29 @@ const totalDuration = computed(() =>
             </form>
             <h1 v-else class="flex items-center gap-2 truncate text-2xl font-semibold">
               {{ detail.name }}
-              <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
-                      :title="t('pl.rename')" @click="renaming = true; renameDraft = detail.name">✎</button>
-              <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
-                      :title="t('pl.delete')" @click="remove">🗑</button>
+              <template v-if="detail.mine">
+                <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
+                        :title="t('pl.rename')" @click="renaming = true; renameDraft = detail.name">✎</button>
+                <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
+                        :title="t('pl.delete')" @click="remove">🗑</button>
+              </template>
             </h1>
-            <p class="mt-1 text-sm" :style="{ color: 'var(--c-text-muted)' }">
-              {{ t('common.songs', { n: detail.items.length }) }}
-              <span v-if="totalDuration"> · {{ formatTime(totalDuration) }}</span>
+            <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" :style="{ color: 'var(--c-text-muted)' }">
+              <template v-if="!detail.mine">
+                <span>{{ t('pl.by', { name: detail.owner_name ?? '?' }) }}</span>
+                <span aria-hidden="true">·</span>
+              </template>
+              <span>{{ t('common.songs', { n: detail.items.length }) }}<template v-if="totalDuration"> · {{ formatTime(totalDuration) }}</template></span>
+              <button
+                v-if="detail.mine"
+                class="cursor-pointer rounded-full border-0 px-2.5 py-0.5 text-xs font-medium"
+                :style="detail.public
+                  ? { background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }
+                  : { background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }"
+                :title="t(detail.public ? 'pl.makePrivateHint' : 'pl.makePublicHint')"
+                :aria-pressed="detail.public"
+                @click="togglePublic"
+              >{{ t(detail.public ? 'pl.public' : 'pl.private') }}</button>
             </p>
           </div>
           <div class="flex flex-wrap gap-2">
@@ -329,6 +437,13 @@ const totalDuration = computed(() =>
               :disabled="!detail.items.length || busy"
               @click="play('append')"
             >{{ t('pl.queueAll') }}</button>
+            <button
+              v-if="!detail.mine && signedIn"
+              class="cursor-pointer rounded-full border-0 px-3.5 py-2 text-sm"
+              :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
+              :title="t('pl.copyHint')"
+              @click="copyToMine"
+            >{{ t('pl.copy') }}</button>
           </div>
         </div>
 
@@ -339,15 +454,16 @@ const totalDuration = computed(() =>
           <li
             v-for="(e, i) in detail.items"
             :key="e.id"
-            class="group flex cursor-grab items-center gap-3 rounded-xl px-3 py-2 active:cursor-grabbing"
+            class="group flex items-center gap-3 rounded-xl px-3 py-2"
+            :class="detail.mine ? 'cursor-grab active:cursor-grabbing' : ''"
             :style="{
               background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)',
               ...(dragOver === i && dragFrom !== null && dragFrom !== i ? { outline: '2px solid var(--c-accent)', outlineOffset: '-2px' } : {}),
               ...(dragFrom === i ? { opacity: 0.4 } : {}),
             }"
-            draggable="true"
-            @dragstart="dragFrom = i"
-            @dragover.prevent="dragOver = i"
+            :draggable="detail.mine"
+            @dragstart="detail.mine && (dragFrom = i)"
+            @dragover.prevent="detail.mine && (dragOver = i)"
             @drop.prevent="onDrop(i)"
             @dragend="dragFrom = null; dragOver = null"
           >
@@ -365,13 +481,14 @@ const totalDuration = computed(() =>
               <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
                       :title="t('common.addToQueue')" @click="play('append', { item: e.id })">＋</button>
-              <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
+              <button v-if="detail.mine" class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
                       :title="t('pl.removeItem')" @click="dropItem(e.id)">✕</button>
+              <AddToPlaylist v-else :source="{ source: 'playlist_entry', playlist_id: detail.id, entry: e.id }" />
             </div>
           </li>
         </ul>
-        <div v-else class="mt-6 rounded-2xl p-6 text-center text-sm"
+        <div v-else-if="detail.mine" class="mt-6 rounded-2xl p-6 text-center text-sm"
              :style="{ background: 'var(--c-surface)', color: 'var(--c-text-muted)' }">
           <p>{{ t('pl.empty') }}</p>
           <p class="mt-1">{{ t('pl.emptyHint') }}</p>

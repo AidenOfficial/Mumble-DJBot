@@ -172,6 +172,10 @@ class UserDatabase:
                 "created_at REAL NOT NULL,"
                 "updated_at REAL NOT NULL)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_user_playlist_owner ON user_playlist (owner)")
+            # 公开歌单:出现在其他人的歌单页(只读,可播放 / 收藏单曲 / 复制一份)
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(user_playlist)")}
+            if 'public' not in columns:
+                conn.execute("ALTER TABLE user_playlist ADD COLUMN public INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS user_playlist_item ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -316,22 +320,52 @@ class UserDatabase:
     def list_playlists(self, owner):
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT p.id, p.name, p.created_at, p.updated_at, "
+                "SELECT p.id, p.name, p.created_at, p.updated_at, p.public, "
                 "COUNT(i.id) AS count, COALESCE(SUM(i.duration), 0) AS total_duration "
                 "FROM user_playlist p LEFT JOIN user_playlist_item i ON i.playlist_id = p.id "
                 "WHERE p.owner=? GROUP BY p.id ORDER BY p.updated_at DESC", (owner,)).fetchall()
-            return [dict(r) for r in rows]
+            return [_playlist_row(r) for r in rows]
+
+    def list_public_playlists(self, exclude_owner=None):
+        """其他人公开的歌单(空歌单不列),带上主人的显示名;不暴露邮箱。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT p.id, p.name, p.created_at, p.updated_at, p.public, p.owner, "
+                "u.alias, u.email, "
+                "COUNT(i.id) AS count, COALESCE(SUM(i.duration), 0) AS total_duration "
+                "FROM user_playlist p "
+                "JOIN user_playlist_item i ON i.playlist_id = p.id "
+                "LEFT JOIN web_user u ON u.identity = p.owner "
+                "WHERE p.public = 1 AND p.owner != ? "
+                "GROUP BY p.id ORDER BY p.updated_at DESC", (exclude_owner or '',)).fetchall()
+            return [_playlist_row(r, with_owner=True) for r in rows]
 
     def get_playlist(self, owner, playlist_id):
+        """主人视角:只能拿到自己的歌单。"""
+        return self._get(playlist_id, owner=owner)
+
+    def get_visible_playlist(self, viewer, playlist_id):
+        """自己的,或别人公开的;都不是返回 None。结果带 mine / owner_name。"""
+        return self._get(playlist_id, viewer=viewer)
+
+    def _get(self, playlist_id, owner=None, viewer=None):
         with self._conn() as conn:
-            row = conn.execute("SELECT id, name, created_at, updated_at FROM user_playlist "
-                               "WHERE id=? AND owner=?", (playlist_id, owner)).fetchone()
+            row = conn.execute(
+                "SELECT p.id, p.name, p.created_at, p.updated_at, p.public, p.owner, u.alias, u.email "
+                "FROM user_playlist p LEFT JOIN web_user u ON u.identity = p.owner WHERE p.id=?",
+                (playlist_id,)).fetchone()
             if row is None:
+                return None
+            mine = row['owner'] == (owner if owner is not None else viewer)
+            if owner is not None and not mine:
+                return None
+            if owner is None and not mine and not row['public']:
                 return None
             items = conn.execute(
                 "SELECT id, item_id, type, title, ref, duration, added_at FROM user_playlist_item "
                 "WHERE playlist_id=? ORDER BY position, id", (playlist_id,)).fetchall()
-            result = dict(row)
+            result = _playlist_row(row, with_owner=not mine)
+            result['mine'] = mine
             result['items'] = [dict(i) for i in items]
             return result
 
@@ -345,6 +379,12 @@ class UserDatabase:
             cur = conn.execute("INSERT INTO user_playlist (owner, name, created_at, updated_at) "
                                "VALUES (?, ?, ?, ?)", (owner, name, now, now))
             return cur.lastrowid
+
+    def set_public(self, owner, playlist_id, public):
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE user_playlist SET public=?, updated_at=? WHERE id=? AND owner=?",
+                               (1 if public else 0, time.time(), playlist_id, owner))
+            return cur.rowcount > 0
 
     def rename_playlist(self, owner, playlist_id, name):
         with self._conn() as conn:
@@ -415,6 +455,28 @@ class UserDatabase:
                              [(i, row_id) for i, row_id in enumerate(ids)])
             conn.execute("UPDATE user_playlist SET updated_at=? WHERE id=?", (time.time(), playlist_id))
             return True
+
+
+def owner_display_name(identity, alias=None, email=None):
+    """歌单主人的显示名:别名 > 邮箱前缀 > Web 用户名。不返回完整邮箱。"""
+    if alias:
+        return alias
+    if email:
+        return email.split('@', 1)[0]
+    if identity and identity.startswith('user:'):
+        return identity[5:]
+    return (identity or '?').split('@', 1)[0]
+
+
+def _playlist_row(row, with_owner=False):
+    data = {k: row[k] for k in ('id', 'name', 'created_at', 'updated_at') if k in row.keys()}
+    for k in ('count', 'total_duration'):
+        if k in row.keys():
+            data[k] = row[k]
+    data['public'] = bool(row['public'])
+    if with_owner:
+        data['owner_name'] = owner_display_name(row['owner'], row['alias'], row['email'])
+    return data
 
 
 class _Closing:
@@ -536,6 +598,16 @@ def _owner():
     return ident.key
 
 
+def _visible(playlist_id):
+    """自己的歌单或别人公开的歌单(只读);都不是就 404。"""
+    if var.user_db is None:
+        abort(404)
+    playlist = var.user_db.get_visible_playlist(current_identity().key, playlist_id)
+    if playlist is None:
+        abort(404)
+    return playlist
+
+
 def _enqueue(wrappers, mode):
     """mode: append(加到队尾) / next(插到当前曲之后) / replace(清空队列后立即播放)。"""
     if not wrappers:
@@ -572,6 +644,8 @@ def create_blueprint(requires_auth):
         data = ident.to_dict()
         data['jwt_verified'] = data['source'] == 'cloudflare-jwt'
         data['mumble'] = var.user_db.mumble_link_for(ident.key) if ident.key and var.user_db else None
+        import web_logs
+        data['can_view_logs'] = web_logs.can_view()
         return data
 
     @api.route('/me', methods=['GET'])
@@ -619,6 +693,14 @@ def create_blueprint(requires_auth):
     @requires_auth
     def playlists():
         return jsonify({'playlists': var.user_db.list_playlists(_owner())})
+
+    @api.route('/playlists/public', methods=['GET'])
+    @requires_auth
+    def public_playlists():
+        """其他人公开的歌单;访客(没有身份)也能看、能播放。"""
+        if var.user_db is None:
+            return jsonify({'playlists': []})
+        return jsonify({'playlists': var.user_db.list_public_playlists(current_identity().key)})
 
     @api.route('/playlists', methods=['POST'])
     @requires_auth
@@ -669,10 +751,34 @@ def create_blueprint(requires_auth):
     @api.route('/playlists/<int:playlist_id>', methods=['GET'])
     @requires_auth
     def get_playlist(playlist_id):
-        playlist = var.user_db.get_playlist(_owner(), playlist_id)
-        if playlist is None:
+        return jsonify(_visible(playlist_id))
+
+    @api.route('/playlists/<int:playlist_id>/visibility', methods=['POST'])
+    @requires_auth
+    def set_visibility(playlist_id):
+        owner = _owner()
+        public = bool(_payload().get('public'))
+        if not var.user_db.set_public(owner, playlist_id, public):
             abort(404)
+        playlist = var.user_db.get_playlist(owner, playlist_id)
+        log.info("web: %s made playlist %r %s", current_user_name(), playlist['name'],
+                 'public' if public else 'private')
         return jsonify(playlist)
+
+    @api.route('/playlists/<int:playlist_id>/copy', methods=['POST'])
+    @requires_auth
+    def copy_playlist(playlist_id):
+        """把(别人公开的或自己的)歌单复制一份到我的歌单里,副本默认私人。"""
+        owner = _owner()
+        source = _visible(playlist_id)
+        name = (_payload().get('name') or '').strip()[:NAME_MAX_LEN] or source['name']
+        try:
+            new_id = var.user_db.create_playlist(owner, name)
+        except ValueError:
+            return jsonify({'error': 'too_many_playlists'}), 409
+        var.user_db.add_items(owner, new_id, source['items'])
+        log.info("web: %s copied playlist %r (%d)", current_user_name(), source['name'], playlist_id)
+        return jsonify(var.user_db.get_playlist(owner, new_id))
 
     @api.route('/playlists/<int:playlist_id>', methods=['DELETE'])
     @requires_auth
@@ -722,6 +828,16 @@ def create_blueprint(requires_auth):
             if not item:
                 abort(404)
             entries.append(entry_from_item(item))
+        elif source == 'playlist_entry':
+            # 从(别人公开的)歌单里收藏一首
+            try:
+                src_id, row_id = int(payload.get('playlist_id')), int(payload.get('entry'))
+            except (TypeError, ValueError):
+                abort(400)
+            src = _visible(src_id)
+            entries = [e for e in src['items'] if e['id'] == row_id]
+            if not entries:
+                abort(404)
         elif source == 'url':
             url = (payload.get('url') or '').strip()
             if payload.get('provider') == 'bilibili':
@@ -768,14 +884,11 @@ def create_blueprint(requires_auth):
         import random
         import web_api
 
-        owner = _owner()
         payload = _payload()
         mode = payload.get('mode', 'append')
         if mode not in ('append', 'next', 'replace'):
             abort(400)
-        playlist = var.user_db.get_playlist(owner, playlist_id)
-        if playlist is None:
-            abort(404)
+        playlist = _visible(playlist_id)
         entries = playlist['items']
         if payload.get('item') is not None:
             try:
@@ -791,8 +904,9 @@ def create_blueprint(requires_auth):
         user = current_user_name()
         wrappers = [w for w in (wrapper_from_entry(e, user) for e in entries) if w]
         _enqueue(wrappers, mode)
-        log.info("web: %s queued %d item(s) from playlist %r (%s)",
-                 user, len(wrappers), playlist['name'], mode)
+        log.info("web: %s queued %d item(s) from playlist %r%s (%s)",
+                 user, len(wrappers), playlist['name'],
+                 '' if playlist['mine'] else f" by {playlist.get('owner_name')}", mode)
         status = web_api.status_payload()
         status['queued'] = len(wrappers)
         status['skipped'] = len(entries) - len(wrappers)

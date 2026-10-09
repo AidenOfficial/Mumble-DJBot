@@ -132,3 +132,6 @@ templates/*.html
 webui/node_modules/
 !webui/dist/**
 !webui/dist/
+
+# Web 日志面板的持久化历史(settings 库旁边)
+logs/

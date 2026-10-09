@@ -108,6 +108,7 @@ export interface Me {
   can_have_playlists: boolean
   jwt_verified?: boolean
   mumble: { mumble_name: string; linked_at: number } | null
+  can_view_logs: boolean
 }
 
 export const fetchMe = () => getJson<Me>('/api/me')
@@ -133,6 +134,9 @@ export interface PlaylistSummary {
   count: number
   total_duration: number
   updated_at: number
+  public: boolean
+  /** 只有别人的公开歌单才有 */
+  owner_name?: string
 }
 
 export interface PlaylistEntry {
@@ -148,6 +152,10 @@ export interface PlaylistDetail {
   id: number
   name: string
   items: PlaylistEntry[]
+  public: boolean
+  /** false = 别人的公开歌单(只读) */
+  mine: boolean
+  owner_name?: string
 }
 
 /** 往歌单里加什么:当前曲 / 队列第 i 首 / 整个队列 / 曲库条目 / 搜索结果链接 */
@@ -156,6 +164,7 @@ export type PlaylistSource =
   | { source: 'all_queue' }
   | { source: 'queue'; index: number }
   | { source: 'library'; item_id: string }
+  | { source: 'playlist_entry'; playlist_id: number; entry: number }
   | { source: 'url'; url: string; title?: string; duration?: number; provider?: string; id?: string }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -170,7 +179,12 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const fetchPlaylists = () =>
   getJson<{ playlists: PlaylistSummary[] }>('/api/playlists').then((r) => r.playlists)
+export const fetchPublicPlaylists = () =>
+  getJson<{ playlists: PlaylistSummary[] }>('/api/playlists/public').then((r) => r.playlists)
 export const fetchPlaylist = (id: number) => getJson<PlaylistDetail>(`/api/playlists/${id}`)
+export const setPlaylistPublic = (id: number, isPublic: boolean) =>
+  send<PlaylistDetail>('POST', `/api/playlists/${id}/visibility`, { public: isPublic })
+export const copyPlaylist = (id: number) => send<PlaylistDetail>('POST', `/api/playlists/${id}/copy`, {})
 export const createPlaylist = (name: string) => send<PlaylistDetail>('POST', '/api/playlists', { name })
 export const renamePlaylist = (id: number, name: string) =>
   send<PlaylistDetail>('POST', `/api/playlists/${id}/rename`, { name })
@@ -322,3 +336,49 @@ export async function startImport(url: string, playlistId?: number): Promise<str
   return body.job_id
 }
 export const fetchImportJob = (id: string) => getJson<ImportJob>(`/api/playlists/import/${id}`)
+
+// ---- 日志 ---------------------------------------------------------------
+
+export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+
+export interface LogEntry {
+  seq: number
+  ts: number
+  level: LogLevel
+  name: string
+  msg: string
+  exc: string | null
+  src: string
+  thread: string
+  /** 每次启动不同;用来在列表里画"重启"分隔线 */
+  run: string
+}
+
+export interface LogState {
+  level: LogLevel
+  debug_until: number | null
+  run: string
+  started_at: number
+  persistent: boolean
+}
+
+export const fetchLogs = (after: number, level: LogLevel, q: string) =>
+  getJson<{ entries: LogEntry[]; last_seq: number; truncated: boolean; state: LogState }>(
+    `/api/logs?after=${after}&level=${level}&q=${encodeURIComponent(q)}&limit=1000`)
+export const setDebugLogging = (enabled: boolean) => send<LogState>('POST', '/api/logs/debug', { enabled })
+export const logsDownloadUrl = (level: LogLevel, q: string) =>
+  `${BASE}/api/logs/download?level=${level}&q=${encodeURIComponent(q)}`
+
+let lastReport = { key: '', at: 0 }
+/** 前端未捕获的错误报给后端,出现在日志面板里(bot.webui)。同一条 10 秒内只报一次。 */
+export function reportClientError(message: string, stack?: string) {
+  const key = message.slice(0, 200)
+  const now = Date.now()
+  if (key === lastReport.key && now - lastReport.at < 10000) return
+  lastReport = { key, at: now }
+  fetch(`${BASE}/api/logs/client`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, stack: stack ?? '', url: location.href }),
+  }).catch(() => { /* 报错本身失败就算了 */ })
+}
