@@ -4,8 +4,20 @@ import {
   fetchChannels, joinChannel, saveChannelSettings, type ChannelNode, type ChannelOverview, type FollowMode,
 } from '../api'
 import ChannelTreeNode from './ChannelTreeNode.vue'
+import LogsPanel from './LogsPanel.vue'
+import { useMe } from '../composables/useMe'
 import { t, tParts } from '../i18n'
 import type { Key } from '../i18n/en'
+
+const { me } = useMe()
+type Tab = 'channel' | 'logs'
+const tab = ref<Tab>('channel')
+try { if (localStorage.getItem('settingsTab') === 'logs') tab.value = 'logs' } catch { /* ignore */ }
+function setTab(next: Tab) {
+  tab.value = next
+  try { localStorage.setItem('settingsTab', next) } catch { /* ignore */ }
+}
+const showLogs = computed(() => tab.value === 'logs' && !!me.value?.can_view_logs)
 
 const data = ref<ChannelOverview | null>(null)
 const error = ref('')
@@ -103,7 +115,24 @@ const modeHint = computed(() => {
 
 <template>
   <section class="mx-auto w-full max-w-3xl px-4 py-8">
-    <h1 class="text-xl font-semibold">{{ t('set.title') }}</h1>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-xl font-semibold">{{ t('set.title') }}</h1>
+      <div v-if="me?.can_view_logs" class="flex gap-1 rounded-full p-1" :style="{ background: 'var(--c-surface-2)' }">
+        <button
+          v-for="tb in (['channel', 'logs'] as const)"
+          :key="tb"
+          class="cursor-pointer rounded-full border-0 px-3.5 py-1 text-xs font-medium"
+          :style="(tb === 'logs') === showLogs
+            ? { background: 'var(--c-surface)', color: 'var(--c-text)', boxShadow: 'var(--shadow-1)' }
+            : { background: 'transparent', color: 'var(--c-text-muted)' }"
+          @click="setTab(tb)"
+        >{{ t(tb === 'logs' ? 'logs.tab' : 'set.tabChannel') }}</button>
+      </div>
+    </div>
+
+    <LogsPanel v-if="showLogs" class="mt-5" />
+
+    <template v-else>
     <p v-if="error" class="mt-3 rounded-lg px-3 py-2 text-sm" :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-danger)' }">{{ error }}</p>
 
     <template v-if="data">
@@ -213,6 +242,7 @@ const modeHint = computed(() => {
         </ul>
         <p v-else class="px-2 py-4 text-sm" :style="{ color: 'var(--c-text-muted)' }">{{ t('set.notConnected') }}</p>
       </div>
+    </template>
     </template>
   </section>
 </template>

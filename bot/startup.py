@@ -17,6 +17,7 @@ from database import SettingsDatabase, MusicDatabase, DatabaseMigration, PlayHis
 from web_users import UserDatabase
 from media.cache import MusicCache
 
+from . import logbuffer
 from .cleanup import CacheCleaner
 from .core import MumbleBot
 
@@ -144,6 +145,8 @@ def main():
     # it a handler of its own, which used to print every bot line twice.
     bot_logger.propagate = False
     var.bot_logger = bot_logger
+    # Web 设置页的日志面板:内存缓冲(拿到 settings 库路径后再接上磁盘历史)
+    logbuffer.install(bot_logger)
 
     # ======================
     #     Load Database
@@ -160,6 +163,9 @@ def main():
         config.get("bot", "music_database_path"))
 
     var.db = SettingsDatabase(var.settings_db_path)
+    # 日志历史放在 settings 库旁边(Docker 里是持久化的 data 卷),重启后还能看到崩溃前的日志
+    logbuffer.buffer.attach_history(os.path.join(
+        os.path.dirname(os.path.abspath(var.settings_db_path)), 'logs', 'bot-log.jsonl'))
 
     if var.config.get("bot", "save_music_library"):
         var.music_db = MusicDatabase(var.music_db_path)

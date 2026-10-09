@@ -249,6 +249,119 @@ class PlaylistTest(Base):
             self.assertIn(wrapper.id, var.cache)
 
 
+class PublicPlaylistTest(Base):
+    """公开 / 私人歌单:公开的出现在别人的列表里,只读,可播放、收藏单曲、复制。"""
+    create = PlaylistTest.create
+
+    def setUp(self):
+        super().setUp()
+        self.alice = self.as_user('alice@example.com')
+        self.bob = self.as_user('bob@example.com')
+        self.client.post('/api/me', json={'alias': 'Alice'}, headers=self.alice)
+        self.pid = self.create('Road trip')
+        for n in range(2):
+            self.client.post(f'/api/playlists/{self.pid}/items', headers=self.alice,
+                             json={'source': 'url', 'url': f'https://e.com/{n}', 'title': f'T{n}'})
+
+    def public_list(self, headers):
+        return self.client.get('/api/playlists/public', headers=headers).get_json()['playlists']
+
+    def test_private_by_default(self):
+        self.assertFalse(self.client.get('/api/playlists', headers=self.alice).get_json()['playlists'][0]['public'])
+        self.assertEqual(self.public_list(self.bob), [])
+        self.assertEqual(self.client.get(f'/api/playlists/{self.pid}', headers=self.bob).status_code, 404)
+
+    def test_public_listing_and_read_only_view(self):
+        rv = self.client.post(f'/api/playlists/{self.pid}/visibility', headers=self.alice, json={'public': True})
+        self.assertTrue(rv.get_json()['public'])
+        listing = self.public_list(self.bob)
+        self.assertEqual([(p['name'], p['owner_name'], p['count']) for p in listing], [('Road trip', 'Alice', 2)])
+        self.assertNotIn('owner', listing[0])
+        self.assertNotIn('alice@example.com', str(listing))
+        # 自己的公开歌单不出现在"大家的"里
+        self.assertEqual(self.public_list(self.alice), [])
+
+        pl = self.client.get(f'/api/playlists/{self.pid}', headers=self.bob).get_json()
+        self.assertFalse(pl['mine'])
+        self.assertEqual(pl['owner_name'], 'Alice')
+        self.assertTrue(self.client.get(f'/api/playlists/{self.pid}', headers=self.alice).get_json()['mine'])
+
+        # 只读:别人改不了
+        for method, path, body in [('post', 'rename', {'name': 'x'}), ('post', 'visibility', {'public': False}),
+                                   ('post', 'items', {'source': 'current'}), ('post', 'move', {'index': 0, 'to': 1})]:
+            rv = getattr(self.client, method)(f'/api/playlists/{self.pid}/{path}', headers=self.bob, json=body)
+            self.assertIn(rv.status_code, (400, 404), path)
+        self.assertEqual(self.client.delete(f'/api/playlists/{self.pid}', headers=self.bob).status_code, 404)
+        after = self.client.get(f'/api/playlists/{self.pid}', headers=self.alice).get_json()
+        self.assertEqual((after['name'], after['public'], [i['title'] for i in after['items']]),
+                         ('Road trip', True, ['T0', 'T1']))
+
+        # 改回私人后立刻消失
+        self.client.post(f'/api/playlists/{self.pid}/visibility', headers=self.alice, json={'public': False})
+        self.assertEqual(self.public_list(self.bob), [])
+        self.assertEqual(self.client.get(f'/api/playlists/{self.pid}', headers=self.bob).status_code, 404)
+
+    def test_empty_public_playlist_not_listed(self):
+        empty = self.create('Empty')
+        self.client.post(f'/api/playlists/{empty}/visibility', headers=self.alice, json={'public': True})
+        self.assertEqual(self.public_list(self.bob), [])
+
+    def test_guest_can_browse_and_play_public(self):
+        self.client.post(f'/api/playlists/{self.pid}/visibility', headers=self.alice, json={'public': True})
+        guest = self.as_user(None)
+        self.assertEqual(len(self.public_list(guest)), 1)
+        with mock.patch('web_users.wrapper_from_entry',
+                        side_effect=lambda e, u: FakeWrapper(FakeItem(e['item_id']))):
+            rv = self.client.post(f'/api/playlists/{self.pid}/play', headers=guest, json={'mode': 'append'})
+        self.assertEqual(rv.get_json()['queued'], 2)
+        # 访客不能复制(没有自己的歌单)
+        self.assertEqual(self.client.post(f'/api/playlists/{self.pid}/copy', headers=guest).status_code, 403)
+
+    def test_play_private_playlist_of_someone_else_is_404(self):
+        rv = self.client.post(f'/api/playlists/{self.pid}/play', headers=self.bob, json={'mode': 'append'})
+        self.assertEqual(rv.status_code, 404)
+
+    def test_copy_and_favorite_single_entry(self):
+        self.client.post(f'/api/playlists/{self.pid}/visibility', headers=self.alice, json={'public': True})
+        copy = self.client.post(f'/api/playlists/{self.pid}/copy', headers=self.bob).get_json()
+        self.assertEqual(copy['name'], 'Road trip')
+        self.assertTrue(copy['mine'])
+        self.assertFalse(copy['public'])
+        self.assertEqual([i['title'] for i in copy['items']], ['T0', 'T1'])
+
+        source = self.client.get(f'/api/playlists/{self.pid}', headers=self.bob).get_json()
+        mine = self.create('Faves', 'bob@example.com')
+        rv = self.client.post(f'/api/playlists/{mine}/items', headers=self.bob,
+                              json={'source': 'playlist_entry', 'playlist_id': self.pid,
+                                    'entry': source['items'][1]['id']})
+        self.assertEqual(rv.get_json()['added'], 1)
+        self.assertEqual(rv.get_json()['playlist']['items'][0]['title'], 'T1')
+
+        # 私人歌单里的条目不能被别人收藏
+        self.client.post(f'/api/playlists/{self.pid}/visibility', headers=self.alice, json={'public': False})
+        rv = self.client.post(f'/api/playlists/{mine}/items', headers=self.bob,
+                              json={'source': 'playlist_entry', 'playlist_id': self.pid,
+                                    'entry': source['items'][0]['id']})
+        self.assertEqual(rv.status_code, 404)
+
+    def test_owner_name_falls_back_to_email_prefix(self):
+        self.client.post('/api/me', json={'alias': ''}, headers=self.alice)
+        self.client.post(f'/api/playlists/{self.pid}/visibility', headers=self.alice, json={'public': True})
+        self.assertEqual(self.public_list(self.bob)[0]['owner_name'], 'alice')
+
+    def test_migration_adds_public_column(self):
+        import sqlite3
+        path = os.path.join(self.tmp.name, 'old.db')
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE user_playlist (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, "
+                     "name TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+        conn.execute("INSERT INTO user_playlist (owner, name, created_at, updated_at) VALUES ('a', 'Old', 0, 0)")
+        conn.commit()
+        conn.close()
+        db = web_users.UserDatabase(path)
+        self.assertFalse(db.list_playlists('a')[0]['public'])
+
+
 class EntryRebuildTest(unittest.TestCase):
     def test_url_from_playlist_is_stored_as_plain_url(self):
         item = mock.Mock(type='url_from_playlist', url='https://e.com/v', duration=60, id='pl-id')
