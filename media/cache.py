@@ -1,7 +1,6 @@
 import logging
 import os
 
-import json
 import threading
 
 from media.item import item_builders, item_id_generators, dict_to_item

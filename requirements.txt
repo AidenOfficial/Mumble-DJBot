@@ -4,7 +4,6 @@ python-magic
 Pillow
 mutagen
 requests
-packaging
 # Cloudflare Access JWT 校验(可选功能,配置了 access_aud 才会用到)
 PyJWT[crypto]
 # 导入歌单时简繁转换(纯 Python,Apache-2.0)

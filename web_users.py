@@ -751,7 +751,7 @@ def _entries_from_source(payload):
     return entries
 
 
-def _enqueue(wrappers, mode):
+def enqueue(wrappers, mode):
     """mode: append(加到队尾) / next(插到当前曲之后) / replace(清空队列后立即播放)。"""
     if not wrappers:
         return
@@ -1036,7 +1036,7 @@ def create_blueprint(requires_auth):
             # 整张歌单:队列里折叠成一组显示,不把"正在播放"页面淹没
             from media.cache import tag_group
             tag_group(wrappers, playlist['name'], 'playlist', playlist_id)
-        _enqueue(wrappers, mode)
+        enqueue(wrappers, mode)
         log.info("web: %s queued %d item(s) from playlist %r%s (%s)",
                  user, len(wrappers), playlist['name'],
                  '' if playlist['mine'] else f" by {playlist.get('owner_name')}", mode)

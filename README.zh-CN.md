@@ -54,7 +54,7 @@ Mumble-DJBot 可播放来自 YouTube、Bilibili、Spotify、直播、网络电�
 
 ### Web 界面
 
-控制台位于 `/`，原有界面保留在 `/legacy`。
+控制台位于 `/`。
 
 - **Now Playing：** 高清专辑封面（按视频标题去网易云 / iTunes / Deezer 匹配，匹配不上用视频封面）、可拖动的播放进度；准备面板显示当前所处阶段及预计开始播放的时间。
 - **队列：** 支持拖拽排序，并可统一搜索 YouTube 与 Bilibili。
@@ -113,7 +113,7 @@ channel = Music              ; 多级频道以斜杠分隔，如 Games/Squad
 [bot]
 username = MusicBot
 admin = YourMumbleName       ; 多个管理员以分号分隔
-language = zh_CN             ; 可选语言见 lang/ 目录
+language = zh_CN             ; 可选 en_US、zh_CN、ja_JP
 
 [webinterface]
 enabled = True
@@ -250,10 +250,10 @@ npm run build   # 生产构建输出至 webui/dist
 | `mumbleBot.py`, `bot/` | 程序入口；连接管理、播放主循环（`player.py`）、频道跟随（`channels.py`）、缓存与清理 |
 | `media/` | 各类音源（URL、Bilibili、Spotify、直播、电台、本地文件）、播放队列、SponsorBlock |
 | `commands/` | 聊天命令处理 |
-| `interface.py`, `web_*.py` | Flask 应用：旧版接口与 `/api/*` 接口 |
+| `interface.py`, `web_*.py`, `templates/` | Flask 应用：鉴权与 `/api/*` 接口 |
 | `playlist_import.py` | 歌单导入与 YouTube 匹配 |
 | `webui/` | Web 界面源码与构建产物 |
-| `lang/` | 聊天消息与帮助文本的翻译 |
+| `lang/` | 聊天消息与帮助文本（英文、简体中文、日文） |
 | `deploy/` | 部署文档与 systemd 单元文件 |
 | `tests/` | 单元测试 |
 

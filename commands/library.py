@@ -182,7 +182,7 @@ def cmd_search_library(bot, user, text, command, parameter):
                 if len(item.tags) > 0:
                     msgs.append("<li><b>{:d}</b> - [{}] <b>{}</b> (<i>{}</i>)</li>".format(count, item.display_type(), item.title, ", ".join(item.tags)))
                 else:
-                    msgs.append("<li><b>{:d}</b> - [{}] <b>{}</b> </li>".format(count, item.display_type(), item.title, ", ".join(item.tags)))
+                    msgs.append("<li><b>{:d}</b> - [{}] <b>{}</b> </li>".format(count, item.display_type(), item.title))
 
             if count != 0:
                 msgs.append("</ul>")

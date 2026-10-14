@@ -230,6 +230,49 @@ export const fetchFavorites = () => getJson<FavoritesState>('/api/favorites')
 export const setFavorite = (src: PlaylistSource, favorite: boolean) =>
   send<FavoritesState>('POST', '/api/favorites', { ...src, favorite })
 
+// ---- 曲库 --------------------------------------------------------------
+
+export interface LibraryItem {
+  id: string
+  title: string
+  /** 显示用类型名(display_type) */
+  type: string
+  artist: string
+  /** 本地文件是相对路径,其余是 URL */
+  path: string
+  /** data: URI;没有封面时为空串 */
+  thumb: string
+  tags: string[]
+}
+
+export interface LibraryInfo {
+  dirs: string[]
+  tags: string[]
+  upload_enabled: boolean
+  max_upload_file_size: number
+}
+
+export interface LibraryQuery {
+  /** 逗号分隔的 file / url / radio */
+  type: string
+  /** 逗号分隔,全部命中 */
+  tags: string
+  /** 空格分隔,全部命中 */
+  keywords: string
+  page: number
+}
+
+export interface LibraryPage {
+  items: LibraryItem[]
+  total_pages: number
+  active_page: number
+}
+
+export const fetchLibraryInfo = () => getJson<LibraryInfo>('/api/library/info')
+export const queryLibrary = (q: LibraryQuery) => postJson<LibraryPage>('/api/library/query', q)
+export const enqueueLibraryItem = (id: string, mode: 'append' | 'next') =>
+  postJson<{ ok: boolean }>('/api/library/enqueue', { id, mode })
+
 // ---- 缓存管理 -----------------------------------------------------------
 
 export interface CacheEntry {

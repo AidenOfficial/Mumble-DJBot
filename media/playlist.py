@@ -8,7 +8,7 @@ import variables as var
 from media.cache import (CachedItemWrapper, ItemNotCachedError,
                          get_cached_wrapper_from_dict, get_cached_wrapper_by_id)
 from database import Condition
-from media.item import ValidationFailedError, PreparationFailedError
+from media.item import ValidationFailedError
 
 
 def get_playlist(mode, _list=None, _index=None):
@@ -286,15 +286,6 @@ class BasePlaylist(list):
                         music_wrapper.group = groups.setdefault(group['key'], group)
                     music_wrappers.append(music_wrapper)
             self.from_list(music_wrappers, current_index)
-
-    def _debug_print(self):
-        print("===== Playlist(%d) =====" % self.current_index)
-        for index, item_wrapper in enumerate(self):
-            if index == self.current_index:
-                print("-> %d %s" % (index, item_wrapper.format_debug_string()))
-            else:
-                print("%d %s" % (index, item_wrapper.format_debug_string()))
-        print("=====     End     =====")
 
     def async_validate(self):
         if not self.validating_thread_lock.locked():

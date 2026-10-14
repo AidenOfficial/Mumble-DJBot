@@ -23,7 +23,6 @@ from .core import MumbleBot
 
 
 def start_web_interface(addr, port):
-    global formatter
     import interface
 
     # setup logger
@@ -106,7 +105,7 @@ def main():
         logging.error(f'Could not read configuration from file "{args.config}"')
         sys.exit()
 
-    extra_configs = util.check_extra_config(config, default_config)
+    extra_configs, obsolete_configs = util.check_extra_config(config, default_config)
     if extra_configs:
         extra_str = ", ".join([f"'[{k}] {v}'" for (k, v) in extra_configs])
         logging.error(f'Unexpected config items {extra_str} defined in your config file. '
@@ -147,6 +146,10 @@ def main():
     var.bot_logger = bot_logger
     # Web 设置页的日志面板:内存缓冲(拿到 settings 库路径后再接上磁盘历史)
     logbuffer.install(bot_logger)
+
+    if obsolete_configs:
+        obsolete_str = ", ".join([f"'[{k}] {v}'" for (k, v) in obsolete_configs])
+        bot_logger.warning(f"Ignoring obsolete config items {obsolete_str}; they can be removed from your config file.")
 
     # ======================
     #     Load Database
@@ -204,7 +207,10 @@ def main():
         lang = var.config.get('bot', 'language')
 
     if lang not in supported_languages:
-        raise KeyError(f"Unsupported language {lang}")
+        # 只维护 en_US / zh_CN / ja_JP;以前的 de_DE、fr_FR 等语言包已删除,旧配置回退到英文
+        bot_logger.warning(f"Unsupported language {lang}, falling back to en_US. "
+                           f"Available: {', '.join(sorted(supported_languages))}")
+        lang = 'en_US'
     var.language = lang
     constants.load_lang(lang)
 

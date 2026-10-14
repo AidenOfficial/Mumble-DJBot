@@ -5,10 +5,8 @@ from constants import commands
 from ._shared import _spotify_available  # noqa: F401  (probed by scripts/smoke_test.py)
 from .admin import (
     cmd_help,
-    cmd_item,
     cmd_joinme,
     cmd_kill,
-    cmd_loop_state,
     cmd_real_time_rms,
     cmd_update,
     cmd_url_ban,
@@ -142,7 +140,5 @@ def register_all_commands(bot):
 
     # Just for debug use
     bot.register_command('rtrms', cmd_real_time_rms, True)
-    # bot.register_command('loop', cmd_loop_state, True)
-    # bot.register_command('item', cmd_item, True)
 
 
