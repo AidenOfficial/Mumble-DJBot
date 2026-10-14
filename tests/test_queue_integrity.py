@@ -74,6 +74,9 @@ class FakeCache(dict):
     def save(self, id):
         pass
 
+    def save_item(self, item):
+        pass
+
     def free(self, id):
         self.pop(id, None)
 

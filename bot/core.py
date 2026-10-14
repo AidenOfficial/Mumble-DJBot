@@ -2,6 +2,7 @@
 import collections
 import logging
 import os
+import queue
 import re
 import signal
 import sys
@@ -125,6 +126,7 @@ class MumbleBot(PlayerMixin, ChannelMixin):
                              stereo=self.stereo,
                              debug=var.config.getboolean('debug', 'mumble_connection'),
                              certfile=certificate or None)
+        self._start_message_worker()
         self.mumble.callbacks.text_message_received.set_handler(self.message_received)
 
         # Sound reception is decided per user queue in pymumble 2.x. Keep it
@@ -308,14 +310,36 @@ class MumbleBot(PlayerMixin, ChannelMixin):
     #         Message
     # =======================
 
+    def _start_message_worker(self):
+        # pymumble 在自己的主循环线程里同步调用回调,而往服务器发音频包也是这个线程。
+        # 以前直接在回调里处理命令:点歌要建条目、写库、起校验线程(还 sleep 0.1s)、
+        # 回消息,处理多久音频就断多久——在聊天框点歌会卡顿约 1 秒。
+        # 现在回调只把消息放进队列,由单独的线程按顺序处理。
+        self._message_queue = queue.Queue()
+        th = threading.Thread(target=self._message_worker, name="CommandWorker", daemon=True)
+        th.start()
+
+    def _message_worker(self):
+        while True:
+            text = self._message_queue.get()
+            try:
+                self._handle_message(text)
+            except Exception:
+                # 任何异常(例如发送者刚好下线导致 users[actor] KeyError)只影响这一条
+                self.log.exception("bot: failed to handle a text message")
+
     # All text send to the chat is analysed by this function
     def message_received(self, text):
-        # 运行在 pymumble 的回调线程里:任何异常(例如发送者刚好下线导致
-        # users[actor] KeyError)都不能冒泡出去拖垮连接线程。
-        try:
-            self._handle_message(text)
-        except Exception:
-            self.log.exception("bot: failed to handle a text message")
+        """pymumble 回调(在它的网络/音频线程里):只入队,立刻返回。"""
+        message_queue = getattr(self, '_message_queue', None)
+        if message_queue is None:
+            # 没走 __init__ 的场景(测试替身):退回同步处理
+            try:
+                self._handle_message(text)
+            except Exception:
+                self.log.exception("bot: failed to handle a text message")
+            return
+        message_queue.put(text)
 
     def _handle_message(self, text):
         raw_message = text.message.strip()

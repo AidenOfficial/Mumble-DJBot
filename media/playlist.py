@@ -262,7 +262,10 @@ class BasePlaylist(list):
             var.db.set("playlist", "current_index", self.current_index)
 
             for index, music in enumerate(self):
-                var.db.set("playlist_item", str(index), json.dumps({'id': music.id, 'user': music.user}))
+                record = {'id': music.id, 'user': music.user}
+                if getattr(music, 'group', None):
+                    record['group'] = music.group
+                var.db.set("playlist_item", str(index), json.dumps(record))
 
     def load(self):
         current_index = var.db.getint("playlist", "current_index", fallback=-1)
@@ -272,11 +275,15 @@ class BasePlaylist(list):
         items = var.db.items("playlist_item")
         if items:
             music_wrappers = []
+            groups = {}  # 同一组的条目共用一个 dict,和入队时一样
             items.sort(key=lambda v: int(v[0]))
             for item in items:
                 item = json.loads(item[1])
                 music_wrapper = get_cached_wrapper_by_id(item['id'], item['user'])
                 if music_wrapper:
+                    group = item.get('group')
+                    if isinstance(group, dict) and group.get('key'):
+                        music_wrapper.group = groups.setdefault(group['key'], group)
                     music_wrappers.append(music_wrapper)
             self.from_list(music_wrappers, current_index)
 

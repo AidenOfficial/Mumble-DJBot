@@ -125,11 +125,16 @@ class PlaylistCommandTest(Base):
         personal.cmd_my_playlist(self.bot, 'Aiden', Text(1), 'mylist', '')
         self.assertIn('深夜作业', self.bot.sent[-1])
         built = []
-        with mock.patch('web_users.wrapper_from_entry', side_effect=lambda e, u: built.append((e['title'], u)) or e):
+        with mock.patch('web_users.wrapper_from_entry',
+                        side_effect=lambda e, u: built.append((e['title'], u)) or mock.Mock(group=None)):
             personal.cmd_my_playlist(self.bot, 'Aiden', Text(1), 'mylist', '1')
             personal.cmd_my_playlist(self.bot, 'Aiden', Text(1), 'mylist', '深夜 shuffle')
         self.assertEqual(built[:3], [('S0', 'Aiden'), ('S1', 'Aiden'), ('S2', 'Aiden')])
         self.assertEqual(var.playlist.extend.call_count, 2)
+        # 整张歌单入队时打成一组,网页队列里折叠显示
+        queued = var.playlist.extend.call_args_list[0].args[0]
+        self.assertEqual({w.group['key'] for w in queued}, {queued[0].group['key']})
+        self.assertEqual(queued[0].group['name'], '深夜作业')
         self.assertEqual(self.bot.downloads, 2)
         personal.cmd_my_playlist(self.bot, 'Aiden', Text(1), 'mylist', '不存在')
         self.assertIn('不存在', self.bot.sent[-1])

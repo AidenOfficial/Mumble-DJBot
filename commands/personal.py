@@ -13,10 +13,11 @@ import time
 from constants import tr_cli as tr
 import variables as var
 import web_users
+from media.cache import tag_group
 
 from ._shared import log
 
-FAV_DEFAULT = 'Favorites'
+FAV_DEFAULT = web_users.FAVORITES_NAME
 MAX_FAILURES = 5
 LOCKOUT_SECONDS = 600
 _failures = {}  # mumble_key -> [失败时间戳]
@@ -135,6 +136,8 @@ def cmd_my_playlist(bot, user, text, command, parameter):
     if not wrappers:
         bot.send_msg(tr('mylist_empty_playlist', name=pl['name']), text)
         return
+    if len(wrappers) > 1:
+        tag_group(wrappers, pl['name'], 'playlist', pl['id'])
     var.playlist.extend(wrappers)
     bot.async_download_next()
     bot.send_msg(tr('mylist_queued', name=pl['name'], count=len(wrappers)), text)
