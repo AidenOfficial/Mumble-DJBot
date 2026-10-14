@@ -135,3 +135,6 @@ webui/node_modules/
 
 # Web 日志面板的持久化历史(settings 库旁边)
 logs/
+
+# 专辑封面缓存(media/artwork.py 默认放在 settings 库旁边的 artwork/)
+artwork/

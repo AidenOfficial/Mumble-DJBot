@@ -1,7 +1,7 @@
 """Web 日志面板的数据源:内存环形缓冲 + 磁盘 JSONL 历史。
 
 - 挂在 "bot" logger 上收全部级别;另挂一份到 root logger,只收第三方库
-  (pymumble、Flask 路由异常等)WARNING 以上的记录。
+  (pymumble-rev、Flask 路由异常等)WARNING 以上的记录。
 - 每条记录同时追加写入 <settings 库所在目录>/logs/bot-log.jsonl(按大小滚动)。
   bot 崩溃 / 被 watchdog 杀掉重启后,启动时把上一轮的尾部读回缓冲,
   面板上还能看到崩溃前发生了什么。

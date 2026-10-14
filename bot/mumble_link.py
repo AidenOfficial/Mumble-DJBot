@@ -3,7 +3,7 @@
 bot 其余部分只用这里暴露的小接口:
   - 状态快照:users(session -> User,只读)、myself、my_channel_id、channels(channel_id -> dict)
   - 命令:send_private / send_channel / move / set_tokens / set_comment / set_avatar / set_self_mute
-  - 音频:write_audio(阻塞到缓冲有空位)、audio_buffered、volume、receive_voice
+  - 音频:write_audio(阻塞到缓冲有空位)、audio_buffered、volume、receive_voice、cut_audio
   - 回调:on_text / on_user_joined / on_user_updated / on_user_left / on_voice
 
 回调在本模块自己的分发线程里依次调用(不是网络线程,也不持任何锁),
@@ -33,6 +33,8 @@ log = logging.getLogger("bot")
 
 #: 写给服务器的音频缓冲上限(秒)。播放线程写满后自然被播放速度节流。
 AUDIO_BUFFER_SECONDS = 0.5
+#: 建连 + TLS + 服务器同步完成的总超时(秒)。库默认 10 秒,频道多、链路慢的服务器可能不够。
+CONNECT_TIMEOUT = 30.0
 
 
 @dataclass(frozen=True)
@@ -67,10 +69,15 @@ class MumbleLink:
             ssl_context=default_ssl_context(certfile or None),
             channels=2 if stereo else 1,
             bitrate=bitrate,
+            connect_timeout=CONNECT_TIMEOUT,
         )
         self._buffer = None
         self._volume = 1.0
         self._cutting = False
+        #: 每次 cut_audio / clear_audio 加一。write_audio 用它发现"我阻塞期间缓冲被清过",
+        #: 把 PcmBuffer.write 在 clear 之后补写进去的剩余部分再清掉(见 write_audio)
+        self._cut_generation = 0
+        self._closing = False
         self._decoders = {}
         self._closed = threading.Event()
         self._dispatcher = None
@@ -93,6 +100,7 @@ class MumbleLink:
         self._dispatcher.start()
 
     def close(self):
+        self._closing = True
         self._client.close()
         self._closed.set()
 
@@ -106,8 +114,8 @@ class MumbleLink:
         return self._client.close_reason
 
     def _on_stream_end(self, future):
-        # 正常情况下这个流永远不会结束;结束了说明连接断了
-        if not future.cancelled() and future.exception() is not None:
+        # 正常情况下这个流永远不会结束;结束了说明连接断了。自己 close() 时不用报
+        if not future.cancelled() and future.exception() is not None and not self._closing:
             log.warning("mumble: audio stream ended: %s", future.exception())
 
     def _dispatch(self):
@@ -226,15 +234,22 @@ class MumbleLink:
         """把 PCM(s16le 48 kHz)交给发送端。缓冲满 0.5 秒时阻塞,由播放速度节流。
 
         连接已断返回 False(不抛异常),调用方据此停止播放。
+
+        播放线程绝大部分时间都阻塞在这里(ffmpeg 解码比实时快)。这时 cut_audio() 把缓冲清空,
+        PcmBuffer.write 会被唤醒并把手里这块剩余的旧歌(≤ 10 ms)接着写进刚清空的缓冲——
+        它会在下一首开头冒出来。所以写完后发现期间发生过清空,就把这点残留再清掉。
         """
         buf = self._buffer
         if buf is None:
             return False
+        generation = self._cut_generation
         try:
             buf.write(pcm)
-            return True
         except BufferClosed:
             return False
+        if generation != self._cut_generation:
+            buf.clear()
+        return True
 
     @property
     def audio_buffered(self):
@@ -245,6 +260,7 @@ class MumbleLink:
     def clear_audio(self):
         """丢掉还没播出去的音频。"""
         if self._buffer is not None:
+            self._cut_generation += 1
             self._buffer.clear()
 
     def cut_audio(self, fade=0.03):
@@ -256,6 +272,7 @@ class MumbleLink:
         if self._buffer is None:
             return
         self._cutting = True
+        self._cut_generation += 1
         try:
             self._set_client_volume(0.0)
             time.sleep(fade)
@@ -277,7 +294,8 @@ class MumbleLink:
     def _set_client_volume(self, value):
         try:
             self._client.volume = value
-        except ConnectionClosedError:
+        except (ConnectionClosedError, RuntimeError):
+            # RuntimeError:事件循环刚好在关闭("Event loop is closed")。断线时播放线程不该因此崩
             pass
 
     @property

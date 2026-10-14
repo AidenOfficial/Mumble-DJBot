@@ -1,5 +1,5 @@
 """整张歌单入队后的分组、网页收藏(♥)、歌单占位标题、下载期间条目被移出缓存、
-聊天命令不在 pymumble 线程里处理。"""
+聊天命令不在连接层的事件分发线程里处理。"""
 import configparser
 import os
 import sys
@@ -260,7 +260,7 @@ class MessageWorkerTest(unittest.TestCase):
         bot._start_message_worker()
         started = time.time()
         bot.message_received(object())
-        self.assertLess(time.time() - started, 0.1)  # pymumble 线程立刻回去发音频
+        self.assertLess(time.time() - started, 0.1)  # 事件分发线程立刻返回,不被命令处理拖住
         self.assertTrue(done.wait(2))
 
     def test_worker_survives_a_failing_command(self):

@@ -8,7 +8,7 @@ from media.item import item_id_generators
 
 
 def cmd_joinme(bot, user, text, command, parameter):
-    if parameter:
+    if parameter and parameter not in bot.mumble.tokens:
         # 带了访问令牌:先把它加到本次会话的令牌里,再进对方所在的(可能受限的)频道
         bot.mumble.set_tokens(bot.mumble.tokens + [parameter])
     bot.mumble.move(bot.mumble.users[text.actor].channel_id)
