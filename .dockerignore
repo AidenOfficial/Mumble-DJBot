@@ -11,3 +11,15 @@ music_folder/
 data/
 *.log
 **/node_modules/
+# 部署目录里的运行时数据与密钥:运行时都是挂载进来的,不能也不必打进镜像
+.env
+.env.*
+*.bak
+*.bak-*
+cache/
+artwork/
+logs/
+cookies/
+*cookies*.txt
+.pytest_cache/
+LOOP_PROMPT.md
