@@ -71,3 +71,59 @@ class TestVolumeHelper:
         h.set_volume(0.5)
         assert h.plain_volume_set == 0.5
         assert h.volume_set > 0
+
+
+class TestCheckExtraConfig:
+    @staticmethod
+    def _configs(user_ini):
+        import configparser
+        default = configparser.ConfigParser(interpolation=None, allow_no_value=True)
+        default.read(util.solve_filepath('configuration.default.ini'), encoding='utf-8')
+        config = configparser.ConfigParser(interpolation=None, allow_no_value=True)
+        config.read(util.solve_filepath('configuration.default.ini'), encoding='utf-8')
+        config.read_string(user_ini)
+        return config, default
+
+    def test_default_config_is_clean(self):
+        assert util.check_extra_config(*self._configs('')) == ([], [])
+
+    def test_unknown_option_is_reported(self):
+        extra, obsolete = util.check_extra_config(*self._configs('[bot]\nno_such_option = 1\n'))
+        assert extra == [('bot', 'no_such_option')] and obsolete == []
+
+    def test_removed_update_options_are_tolerated(self):
+        # 旧配置文件里还留着上游的更新配置,不能因此拒绝启动
+        extra, obsolete = util.check_extra_config(*self._configs(
+            '[bot]\nauto_check_update = True\ntarget_version = stable\npip3_path = venv/bin/pip\n'))
+        assert extra == []
+        assert sorted(obsolete) == [('bot', 'auto_check_update'), ('bot', 'pip3_path'),
+                                    ('bot', 'target_version')]
+
+
+class TestUpgradeExtractors:
+    @staticmethod
+    def _fake_run(returncode=0, stdout='', stderr=''):
+        calls = []
+
+        def run(cmd, **kwargs):
+            import subprocess
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
+        return run, calls
+
+    def test_uses_own_interpreter_pip(self, monkeypatch):
+        run, calls = self._fake_run(stdout='Successfully installed yt-dlp-2026.10.1\n')
+        monkeypatch.setattr(util.sp, 'run', run)
+        msg = util.upgrade_extractors()
+        assert calls == [[sys.executable, '-m', 'pip', 'install', '--upgrade', 'yt-dlp', 'spotdl']]
+        assert 'yt-dlp-2026.10.1' in msg and 'Restart' in msg
+
+    def test_already_up_to_date(self, monkeypatch):
+        run, _ = self._fake_run(stdout='Requirement already satisfied: yt-dlp\n')
+        monkeypatch.setattr(util.sp, 'run', run)
+        assert 'up to date' in util.upgrade_extractors()
+
+    def test_pip_failure_is_reported_not_raised(self, monkeypatch):
+        run, _ = self._fake_run(returncode=1, stderr='boom')
+        monkeypatch.setattr(util.sp, 'run', run)
+        assert 'failed' in util.upgrade_extractors().lower()

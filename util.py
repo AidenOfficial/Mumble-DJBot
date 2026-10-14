@@ -16,14 +16,9 @@ import ipaddress
 import socket
 import subprocess as sp
 import logging
-from importlib import reload
 from sys import platform
 import traceback
 import requests
-from packaging import version
-
-import yt_dlp as youtube_dl
-YT_PKG_NAME = 'yt-dlp'
 
 log = logging.getLogger("bot")
 
@@ -106,69 +101,31 @@ def get_user_ban():
     return res
 
 
-def new_release_version(target):
-    if target == "testing":
-        r = requests.get("https://packages.azlux.fr/botamusique/testing-version")
-    else:
-        r = requests.get("https://packages.azlux.fr/botamusique/version")
-    v = r.text
-    return v.rstrip()
+# yt-dlp / spotdl 跟着 B 站、YouTube 改版频繁更新;与 entrypoint.sh 的 BAM_UPDATE_ON_START 升级同一组包
+EXTRACTOR_PACKAGES = ('yt-dlp', 'spotdl')
 
 
-def fetch_changelog():
-    r = requests.get("https://packages.azlux.fr/botamusique/changelog")
-    c = r.text
-    return c
+def upgrade_extractors():
+    """用当前解释器的 pip 升级 yt-dlp / spotdl,返回给管理员看的结果文本(HTML)。
 
-
-def check_update(current_version):
-    global log
-    log.debug("update: checking for updates...")
-    new_version = new_release_version(var.config.get('bot', 'target_version'))
+    已加载的模块不会被替换,新版本要重启 bot 才生效。
+    """
+    log.info(f"update: upgrading {', '.join(EXTRACTOR_PACKAGES)} via pip")
     try:
-        update_available = version.parse(new_version) > version.parse(current_version)
-    except version.InvalidVersion:
-        log.debug("update: version string not comparable, skipping update check.")
-        return None, None
-    if update_available:
-        changelog = fetch_changelog()
-        log.info(f"update: new version {new_version} found, current installed version {current_version}.")
-        log.info(f"update: changelog: {changelog}")
-        changelog = changelog.replace("\n", "<br>")
-        return new_version, changelog
-    else:
-        log.debug("update: no new version found.")
-        return None, None
-
-
-def update(current_version):
-    global log
-
-    target = var.config.get('bot', 'target_version')
-    new_version = new_release_version(target)
-    msg = ""
-    if target == "git":
-        msg = "git install, I do nothing<br/>"
-
-    elif (target == "stable" and version.parse(new_version) > version.parse(current_version)) or \
-            (target == "testing" and version.parse(new_version) != version.parse(current_version)):
-        log.info('update: new version, start updating...')
-        tp = sp.check_output(['/usr/bin/env', 'bash', 'update.sh', target]).decode()
-        log.debug(tp)
-        log.info('update: update pip libraries dependencies')
-        sp.check_output([var.config.get('bot', 'pip3_path'), 'install', '--upgrade', '-r', 'requirements.txt']).decode()
-        msg = "New version installed, please restart the bot.<br/>"
-
-    log.info(f'update: starting update {YT_PKG_NAME} via pip3')
-    tp = sp.check_output([var.config.get('bot', 'pip3_path'), 'install', '--upgrade', YT_PKG_NAME]).decode()
-    if f"Collecting {YT_PKG_NAME}" in tp.splitlines():
-        msg += "Update done: " + tp.split('Successfully installed')[1]
-    else:
-        msg += YT_PKG_NAME.capitalize() + " is up-to-date"
-
-    reload(youtube_dl)
-    msg += "<br/>" + YT_PKG_NAME.capitalize() + " reloaded"
-    return msg
+        out = sp.run([sys.executable, '-m', 'pip', 'install', '--upgrade', *EXTRACTOR_PACKAGES],
+                     capture_output=True, text=True, timeout=600)
+    except (OSError, sp.TimeoutExpired) as e:
+        log.error(f"update: pip failed to run: {e}")
+        return f"Update failed: {html.escape(str(e))}"
+    if out.returncode != 0:
+        log.error(f"update: pip exited with {out.returncode}:\n{out.stderr[-2000:]}")
+        return f"Update failed (pip exit code {out.returncode}), see the log for details."
+    log.debug(out.stdout)
+    installed = [line.split('Successfully installed', 1)[1].strip()
+                 for line in out.stdout.splitlines() if 'Successfully installed' in line]
+    if installed:
+        return f"Updated: {html.escape(installed[-1])}<br/>Restart the bot to use the new version."
+    return f"{' / '.join(EXTRACTOR_PACKAGES)} already up to date."
 
 
 def pipe_no_wait():
@@ -717,17 +674,29 @@ def clear_tmp_folder(path, size):
                     return
 
 
+# 已删除、但旧配置文件里可能还留着的配置项:忽略并提示,不当成未知配置拒绝启动
+OBSOLETE_CONFIG = {
+    ('bot', 'auto_check_update'),  # 上游 azlux 的版本检查
+    ('bot', 'target_version'),     # 上游 azlux 的 stable/testing 更新通道
+    ('bot', 'pip3_path'),          # !update 改用当前解释器的 pip
+}
+
+
 def check_extra_config(config, template):
+    """返回 (未知配置项, 已废弃配置项) 两个 (section, option) 列表。"""
     extra = []
+    obsolete = []
 
     for key in config.sections():
         if key in ['radio']:
             continue
         for opt in config.options(key):
-            if not template.has_option(key, opt):
+            if (key, opt) in OBSOLETE_CONFIG:
+                obsolete.append((key, opt))
+            elif not template.has_option(key, opt):
                 extra.append((key, opt))
 
-    return extra
+    return extra, obsolete
 
 
 def parse_cookie_file(cookiefile):

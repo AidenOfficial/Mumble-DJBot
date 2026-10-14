@@ -106,7 +106,7 @@ def main():
         logging.error(f'Could not read configuration from file "{args.config}"')
         sys.exit()
 
-    extra_configs = util.check_extra_config(config, default_config)
+    extra_configs, obsolete_configs = util.check_extra_config(config, default_config)
     if extra_configs:
         extra_str = ", ".join([f"'[{k}] {v}'" for (k, v) in extra_configs])
         logging.error(f'Unexpected config items {extra_str} defined in your config file. '
@@ -147,6 +147,10 @@ def main():
     var.bot_logger = bot_logger
     # Web 设置页的日志面板:内存缓冲(拿到 settings 库路径后再接上磁盘历史)
     logbuffer.install(bot_logger)
+
+    if obsolete_configs:
+        obsolete_str = ", ".join([f"'[{k}] {v}'" for (k, v) in obsolete_configs])
+        bot_logger.warning(f"Ignoring obsolete config items {obsolete_str}; they can be removed from your config file.")
 
     # ======================
     #     Load Database

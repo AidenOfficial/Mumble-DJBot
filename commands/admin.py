@@ -126,8 +126,7 @@ def cmd_kill(bot, user, text, command, parameter):
 def cmd_update(bot, user, text, command, parameter):
     if bot.is_admin(user):
         bot.send_msg(tr('start_updating'), text)
-        msg = util.update(bot.version)
-        bot.send_msg(msg, text)
+        bot.send_msg(util.upgrade_extractors(), text)
     else:
         bot.send_msg(tr('not_admin'), text)
 
