@@ -5,3 +5,7 @@
 *.service   text eol=lf
 *.timer     text eol=lf
 entrypoint.sh text eol=lf
+
+# Everything else that git detects as text is stored and checked out with LF too
+# (a few files used to be CRLF, which made every edit show up as a whole-file diff).
+* text=auto eol=lf
