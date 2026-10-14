@@ -195,13 +195,13 @@ const downloadHref = computed(() => logsDownloadUrl(level.value, query.value.tri
         <button class="cursor-pointer rounded-full border-0 px-3 py-1.5 text-xs font-medium whitespace-nowrap"
                 :style="live ? { background: 'var(--c-accent-soft)', color: 'var(--c-accent)' } : { background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
                 :title="t(live ? 'logs.pauseHint' : 'logs.resumeHint')"
-                @click="live = !live">{{ live ? t('logs.live') : t('logs.paused') }}</button>
+                @click="live = !live"><Icon :icon="live ? 'circle' : 'pause'" class="mr-1" :class="live ? 'animate-pulse text-[8px]' : ''" />{{ live ? t('logs.live') : t('logs.paused') }}</button>
         <button class="cursor-pointer rounded-full border-0 px-3 py-1.5 text-xs whitespace-nowrap"
                 :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                :disabled="!entries.length" @click="copyAll">{{ t(copied ? 'me.copied' : 'logs.copy') }}</button>
+                :disabled="!entries.length" @click="copyAll"><Icon :icon="copied ? 'check' : 'copy'" class="mr-1" />{{ t(copied ? 'me.copied' : 'logs.copy') }}</button>
         <a class="rounded-full px-3 py-1.5 text-xs whitespace-nowrap no-underline"
            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-           :href="downloadHref" :title="t('logs.downloadHint')">{{ t('logs.download') }}</a>
+           :href="downloadHref" :title="t('logs.downloadHint')"><Icon icon="download" class="mr-1" />{{ t('logs.download') }}</a>
       </div>
     </div>
 
@@ -232,7 +232,7 @@ const downloadHref = computed(() => logsDownloadUrl(level.value, query.value.tri
           <div class="min-w-0 flex-1">
             <p class="break-words whitespace-pre-wrap" :style="{ color: row.e.level === 'DEBUG' ? 'var(--c-text-muted)' : 'var(--c-text)' }">
               <span v-if="row.e.name !== 'bot'" class="mr-1 rounded px-1" :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }">{{ row.e.name }}</span>{{ row.e.msg }}<span
-                v-if="row.e.exc && !expanded[row.e.seq]" class="ml-1 font-sans" :style="{ color: 'var(--c-accent)' }">{{ t('logs.showTrace') }}</span>
+                v-if="row.e.exc && !expanded[row.e.seq]" class="ml-1 font-sans" :style="{ color: 'var(--c-accent)' }"><Icon icon="caret-right" class="mr-0.5" />{{ t('logs.showTrace') }}</span>
             </p>
             <pre v-if="row.e.exc && expanded[row.e.seq]" class="mt-1 mb-1 overflow-x-auto rounded-lg p-2 text-[11px]"
                  :style="{ background: 'var(--c-bg)', color: 'var(--c-danger)' }">{{ row.e.exc }}</pre>

@@ -30,6 +30,8 @@ ALIAS_MAX_LEN = 24
 NAME_MAX_LEN = 60
 MAX_PLAYLISTS_PER_USER = 50
 MAX_ITEMS_PER_PLAYLIST = 1000
+# "我喜欢的音乐":网页上的 ♥ 和聊天里的 !fav 都往这个名字的歌单里加(没有就自动建)
+FAVORITES_NAME = 'Favorites'
 BIND_CODE_TTL = 600
 # 别名会被拼进 Mumble 的 HTML 消息里,禁止尖括号等标记字符
 _ALIAS_RE = re.compile(r'^[^<>&"\'\x00-\x1f]+$')
@@ -440,6 +442,40 @@ class UserDatabase:
             conn.execute("UPDATE user_playlist SET updated_at=? WHERE id=?", (time.time(), playlist_id))
             return cur.rowcount > 0
 
+    def favorites_id(self, owner, create=False):
+        """收藏歌单(按名字认,和 !fav 一致)的 id;没有且 create=False 时返回 None。"""
+        with self._conn() as conn:
+            row = conn.execute("SELECT id FROM user_playlist WHERE owner=? AND name=? COLLATE NOCASE "
+                               "ORDER BY id LIMIT 1", (owner, FAVORITES_NAME)).fetchone()
+            if row is not None:
+                return row[0]
+        return self.create_playlist(owner, FAVORITES_NAME) if create else None
+
+    def item_ids(self, playlist_id):
+        with self._conn() as conn:
+            return [r[0] for r in conn.execute(
+                "SELECT item_id FROM user_playlist_item WHERE playlist_id=? ORDER BY position, id",
+                (playlist_id,))]
+
+    def remove_items_by_item_id(self, owner, playlist_id, item_ids):
+        with self._conn() as conn:
+            if not self._owns(conn, owner, playlist_id):
+                return 0
+            removed = 0
+            for item_id in item_ids:
+                removed += conn.execute("DELETE FROM user_playlist_item WHERE playlist_id=? AND item_id=?",
+                                        (playlist_id, item_id)).rowcount
+            if removed:
+                conn.execute("UPDATE user_playlist SET updated_at=? WHERE id=?", (time.time(), playlist_id))
+            return removed
+
+    def update_entry_meta(self, playlist_id, updates):
+        """updates: {行 id: (title, duration)}。只补元数据,不算歌单被修改(updated_at 不变)。"""
+        with self._conn() as conn:
+            conn.executemany("UPDATE user_playlist_item SET title=?, duration=? WHERE id=? AND playlist_id=?",
+                             [(title, duration, row_id, playlist_id)
+                              for row_id, (title, duration) in updates.items()])
+
     def move_item(self, owner, playlist_id, src, dst):
         """按当前顺序把第 src 条移到第 dst 条,然后重排 position。"""
         with self._conn() as conn:
@@ -470,6 +506,8 @@ def owner_display_name(identity, alias=None, email=None):
 
 def _playlist_row(row, with_owner=False):
     data = {k: row[k] for k in ('id', 'name', 'created_at', 'updated_at') if k in row.keys()}
+    if not with_owner:
+        data['favorites'] = (row['name'] or '').lower() == FAVORITES_NAME.lower()
     for k in ('count', 'total_duration'):
         if k in row.keys():
             data[k] = row[k]
@@ -537,6 +575,54 @@ def entry_from_url(url, title='', duration=0):
     }
 
 
+def _apply_placeholder(wrapper, entry):
+    """还没读过信息的链接条目先用歌单里存的标题/时长占位,队列里不再是一串 https://…
+    真正校验后 yt-dlp 读到的标题会覆盖它。"""
+    try:
+        item = wrapper.item()
+    except Exception:
+        return
+    title = (entry.get('title') or '').strip()
+    if not getattr(item, 'title', '') and title and title != entry.get('ref'):
+        item.title = title
+    if not getattr(item, 'duration', 0) and entry.get('duration'):
+        try:
+            item.duration = int(entry['duration'])
+        except (TypeError, ValueError):
+            pass
+
+
+def heal_entry_titles(playlist):
+    """歌单里标题还是链接的条目(加进来时还没读到信息),用曲库里已有的标题补上并写回。"""
+    if var.user_db is None or getattr(var, 'music_db', None) is None:
+        return playlist
+    updates = {}
+    for entry in playlist.get('items', []):
+        if entry.get('type') != 'url' or (entry.get('title') and entry['title'] != entry.get('ref')):
+            continue
+        cached = getattr(var, 'cache', None)
+        music = cached.get(entry['item_id']) if cached is not None else None
+        if music is not None:
+            music = {'title': getattr(music, 'title', ''), 'duration': getattr(music, 'duration', 0)}
+        else:
+            try:
+                music = var.music_db.query_music_by_id(entry['item_id'])
+            except Exception:
+                continue
+        title = ((music or {}).get('title') or '').strip()
+        if not title or title == entry.get('ref'):
+            continue
+        duration = entry.get('duration') or (music or {}).get('duration') or 0
+        entry['title'], entry['duration'] = title, duration
+        updates[entry['id']] = (title, duration)
+    if updates:
+        try:
+            var.user_db.update_entry_meta(playlist['id'], updates)
+        except Exception:
+            log.debug("web: could not store healed playlist titles", exc_info=True)
+    return playlist
+
+
 def wrapper_from_entry(entry, user):
     """歌单条目 -> 可放进播放队列的 CachedItemWrapper;重建失败返回 None。"""
     from media.cache import get_cached_wrapper_by_id, get_cached_wrapper_from_scrap
@@ -544,7 +630,9 @@ def wrapper_from_entry(entry, user):
     entry_type, ref = entry['type'], entry['ref']
     try:
         if entry_type == 'url' and ref:
-            return get_cached_wrapper_from_scrap(type='url', url=ref, user=user)
+            wrapper = get_cached_wrapper_from_scrap(type='url', url=ref, user=user)
+            _apply_placeholder(wrapper, entry)
+            return wrapper
         if entry_type == 'radio' and ref:
             return get_cached_wrapper_from_scrap(type='radio', url=ref, name=entry.get('title', ''),
                                                  user=user)
@@ -606,6 +694,61 @@ def _visible(playlist_id):
     if playlist is None:
         abort(404)
     return playlist
+
+
+def _entries_from_source(payload):
+    """请求体里的"哪首歌" -> 歌单条目列表。
+    {source: current|queue|all_queue|library|playlist_entry|url, index?, item_id?, url?, ...}"""
+    source = payload.get('source')
+    entries = []
+    if source == 'current':
+        wrapper = var.playlist.current_item() if len(var.playlist) else None
+        if not wrapper:
+            abort(400)
+        entries.append(entry_from_item(wrapper.item()))
+    elif source == 'queue':
+        try:
+            index = int(payload.get('index', -1))
+        except (TypeError, ValueError):
+            abort(400)
+        if not 0 <= index < len(var.playlist):
+            abort(400)
+        entries.append(entry_from_item(var.playlist[index].item()))
+    elif source == 'all_queue':
+        for wrapper in list(var.playlist):
+            try:
+                entries.append(entry_from_item(wrapper.item()))
+            except Exception:
+                continue
+    elif source == 'library':
+        item = var.cache.get_item_by_id(str(payload.get('item_id', '')))
+        if not item:
+            abort(404)
+        entries.append(entry_from_item(item))
+    elif source == 'playlist_entry':
+        # 从(别人公开的)歌单里收藏一首
+        try:
+            src_id, row_id = int(payload.get('playlist_id')), int(payload.get('entry'))
+        except (TypeError, ValueError):
+            abort(400)
+        src = _visible(src_id)
+        entries = [e for e in src['items'] if e['id'] == row_id]
+        if not entries:
+            abort(404)
+    elif source == 'url':
+        url = (payload.get('url') or '').strip()
+        if payload.get('provider') == 'bilibili':
+            url = util.get_bilibili_url_from_input(payload.get('id') or url)
+        if not url or not url.lower().startswith(('http://', 'https://')):
+            abort(400)
+        try:
+            duration = float(payload.get('duration') or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        entries.append(entry_from_url(url, str(payload.get('title') or '')[:300], duration))
+    else:
+        abort(400)
+    return entries
 
 
 def _enqueue(wrappers, mode):
@@ -751,7 +894,43 @@ def create_blueprint(requires_auth):
     @api.route('/playlists/<int:playlist_id>', methods=['GET'])
     @requires_auth
     def get_playlist(playlist_id):
-        return jsonify(_visible(playlist_id))
+        return jsonify(heal_entry_titles(_visible(playlist_id)))
+
+    # ---- 收藏(我喜欢的音乐) --------------------------------------------------
+
+    def _favorites_payload(owner):
+        playlist_id = var.user_db.favorites_id(owner)
+        return {'playlist_id': playlist_id,
+                'item_ids': var.user_db.item_ids(playlist_id) if playlist_id else []}
+
+    @api.route('/favorites', methods=['GET'])
+    @requires_auth
+    def favorites():
+        """收藏歌单里有哪些歌(按 item_id),用来画实心 / 空心的 ♥。"""
+        ident = current_identity()
+        if not ident.key or var.user_db is None:
+            return jsonify({'playlist_id': None, 'item_ids': []})
+        return jsonify(_favorites_payload(ident.key))
+
+    @api.route('/favorites', methods=['POST'])
+    @requires_auth
+    def toggle_favorite():
+        """Body: 同 /playlists/<id>/items 的来源字段 + favorite: true(收藏)/ false(取消)。
+        收藏歌单就是名叫 Favorites 的那张(和聊天里的 !fav 同一张),没有就自动建。"""
+        owner = _owner()
+        payload = _payload()
+        entries = _entries_from_source(payload)
+        if payload.get('favorite', True):
+            try:
+                playlist_id = var.user_db.favorites_id(owner, create=True)
+            except ValueError:
+                return jsonify({'error': 'too_many_playlists'}), 409
+            var.user_db.add_items(owner, playlist_id, entries)
+        else:
+            playlist_id = var.user_db.favorites_id(owner)
+            if playlist_id:
+                var.user_db.remove_items_by_item_id(owner, playlist_id, [e['item_id'] for e in entries])
+        return jsonify(_favorites_payload(owner))
 
     @api.route('/playlists/<int:playlist_id>/visibility', methods=['POST'])
     @requires_auth
@@ -798,59 +977,9 @@ def create_blueprint(requires_auth):
     @api.route('/playlists/<int:playlist_id>/items', methods=['POST'])
     @requires_auth
     def add_items(playlist_id):
-        """Body: {source: current|queue|library|url, index?, item_id?, url?, title?, duration?,
-        provider?(bilibili)}"""
+        """Body: 见 _entries_from_source"""
         owner = _owner()
-        payload = _payload()
-        source = payload.get('source')
-        entries = []
-        if source == 'current':
-            wrapper = var.playlist.current_item() if len(var.playlist) else None
-            if not wrapper:
-                abort(400)
-            entries.append(entry_from_item(wrapper.item()))
-        elif source == 'queue':
-            try:
-                index = int(payload.get('index', -1))
-            except (TypeError, ValueError):
-                abort(400)
-            if not 0 <= index < len(var.playlist):
-                abort(400)
-            entries.append(entry_from_item(var.playlist[index].item()))
-        elif source == 'all_queue':
-            for wrapper in list(var.playlist):
-                try:
-                    entries.append(entry_from_item(wrapper.item()))
-                except Exception:
-                    continue
-        elif source == 'library':
-            item = var.cache.get_item_by_id(str(payload.get('item_id', '')))
-            if not item:
-                abort(404)
-            entries.append(entry_from_item(item))
-        elif source == 'playlist_entry':
-            # 从(别人公开的)歌单里收藏一首
-            try:
-                src_id, row_id = int(payload.get('playlist_id')), int(payload.get('entry'))
-            except (TypeError, ValueError):
-                abort(400)
-            src = _visible(src_id)
-            entries = [e for e in src['items'] if e['id'] == row_id]
-            if not entries:
-                abort(404)
-        elif source == 'url':
-            url = (payload.get('url') or '').strip()
-            if payload.get('provider') == 'bilibili':
-                url = util.get_bilibili_url_from_input(payload.get('id') or url)
-            if not url or not url.lower().startswith(('http://', 'https://')):
-                abort(400)
-            try:
-                duration = float(payload.get('duration') or 0)
-            except (TypeError, ValueError):
-                duration = 0
-            entries.append(entry_from_url(url, str(payload.get('title') or '')[:300], duration))
-        else:
-            abort(400)
+        entries = _entries_from_source(_payload())
         added = var.user_db.add_items(owner, playlist_id, entries)
         if added is None:
             abort(404)
@@ -903,6 +1032,10 @@ def create_blueprint(requires_auth):
             random.shuffle(entries)
         user = current_user_name()
         wrappers = [w for w in (wrapper_from_entry(e, user) for e in entries) if w]
+        if payload.get('item') is None and len(wrappers) > 1:
+            # 整张歌单:队列里折叠成一组显示,不把"正在播放"页面淹没
+            from media.cache import tag_group
+            tag_group(wrappers, playlist['name'], 'playlist', playlist_id)
         _enqueue(wrappers, mode)
         log.info("web: %s queued %d item(s) from playlist %r%s (%s)",
                  user, len(wrappers), playlist['name'],

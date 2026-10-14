@@ -83,7 +83,7 @@ const etaText = computed(() => {
         </div>
         <p class="mt-1 truncate text-[11px]"
            :style="{ color: i === stepIndex ? 'var(--c-text)' : 'var(--c-text-faint)', fontWeight: i === stepIndex ? 600 : 400 }">
-          {{ i < stepIndex ? '✓ ' : '' }}{{ t(step.label) }}
+          <Icon v-if="i < stepIndex" icon="check" class="mr-1" />{{ t(step.label) }}
         </p>
       </li>
     </ol>

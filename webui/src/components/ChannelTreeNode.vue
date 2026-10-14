@@ -28,16 +28,13 @@ const people = computed(() => props.node.users.filter((u) => !u.is_me && !u.is_b
     >
       <span class="flex min-w-0 items-center gap-1.5 text-sm font-medium"
             :style="{ color: isHere ? 'var(--c-accent)' : 'var(--c-text)' }">
-        <svg viewBox="0 0 24 24" class="h-3.5 w-3.5 shrink-0 opacity-60" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path v-if="depth === 0" d="M3 12h18M3 6h18M3 18h18" />
-          <path v-else d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
-        </svg>
+        <Icon :icon="depth === 0 ? 'server' : 'hashtag'" class="w-3.5 shrink-0 text-xs opacity-60" aria-hidden="true" />
         <span class="truncate">{{ node.name }}</span>
       </span>
       <span v-if="isDefault" class="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-accent)' }" :title="t('ch.defaultTitle')">{{ t('ch.default') }}</span>
+            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-accent)' }" :title="t('ch.defaultTitle')"><Icon icon="star" class="mr-0.5" />{{ t('ch.default') }}</span>
       <span v-if="node.temporary" class="text-[10px]" :style="{ color: 'var(--c-text-faint)' }">{{ t('ch.temporary') }}</span>
-      <span v-if="people" class="text-[11px] tabular-nums" :style="{ color: 'var(--c-text-faint)' }">{{ people }} 👤</span>
+      <span v-if="people" class="text-[11px] tabular-nums" :style="{ color: 'var(--c-text-faint)' }">{{ people }} <Icon icon="user" class="text-[10px]" /></span>
 
       <span class="ml-auto flex shrink-0 gap-1 opacity-70 transition-opacity group-hover:opacity-100">
         <button
@@ -55,7 +52,7 @@ const people = computed(() => props.node.users.filter((u) => !u.is_me && !u.is_b
           :disabled="busy"
           :title="t('ch.setDefaultTitle')"
           @click="emit('setDefault', node.id)"
-        >{{ t('ch.setDefault') }}</button>
+        ><Icon :icon="['far', 'star']" class="mr-0.5" />{{ t('ch.setDefault') }}</button>
       </span>
 
       <!-- 频道里的人 -->
@@ -71,10 +68,11 @@ const people = computed(() => props.node.users.filter((u) => !u.is_me && !u.is_b
         >
           <span class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold"
                 :style="{ background: u.is_me ? 'rgba(255,255,255,0.25)' : 'var(--c-border)' }">
-            {{ u.is_me ? '♪' : u.name.charAt(0).toUpperCase() }}
+            <Icon v-if="u.is_me" icon="music" />
+            <template v-else>{{ u.name.charAt(0).toUpperCase() }}</template>
           </span>
           {{ u.name }}
-          <span v-if="u.deafened" :title="t('ch.deafened')">🔇</span>
+          <Icon v-if="u.deafened" icon="ear-deaf" class="text-[10px] opacity-70" :title="t('ch.deafened')" />
           <span v-else-if="u.muted" class="text-[10px] opacity-70" :title="t('ch.mutedTitle')">{{ t('ch.muted') }}</span>
         </span>
       </div>

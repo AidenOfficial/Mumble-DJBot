@@ -9,7 +9,7 @@ from pyradios import RadioBrowser
 from database import Condition
 from media.item import dict_to_item
 from media.cache import get_cached_wrapper_from_scrap, get_cached_wrapper, get_cached_wrapper_from_dict, \
-    get_cached_wrappers_from_dicts
+    get_cached_wrappers_from_dicts, tag_group
 from media.url_from_playlist import get_playlist_info
 
 from . import _shared
@@ -155,7 +155,11 @@ def cmd_play_playlist(bot, user, text, command, parameter):
         log.debug(f"cmd: fetching media info from playlist url {url}")
         items = get_playlist_info(url=url, start_index=offset, user=user)
         if len(items) > 0:
-            items = var.playlist.extend(list(map(lambda item: get_cached_wrapper_from_scrap(**item), items)))
+            wrappers = [get_cached_wrapper_from_scrap(**item) for item in items]
+            if len(wrappers) > 1:
+                # 整个播放列表在网页队列里折叠成一组
+                tag_group(wrappers, items[0].get('playlist_title') or url, 'url_playlist', url)
+            items = var.playlist.extend(wrappers)
             for music in items:
                 log.info("cmd: add to playlist: " + music.format_debug_string())
         else:

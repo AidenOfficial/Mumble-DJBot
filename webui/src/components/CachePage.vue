@@ -207,14 +207,14 @@ const FILTERS = [
           <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                   :style="e.pinned ? { background: 'var(--c-accent)', color: 'var(--c-on-accent)' } : { background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
                   :title="t(e.pinned ? 'cache.unpin' : 'cache.pin')"
-                  :disabled="rowBusy[e.id]" @click="togglePin(e)">📌</button>
+                  :disabled="rowBusy[e.id]" @click="togglePin(e)"><Icon icon="thumbtack" /></button>
           <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                   :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
                   :title="t('cache.copy')"
-                  :disabled="rowBusy[e.id] || !e.complete" @click="saveToLibrary(e)">💾</button>
+                  :disabled="rowBusy[e.id] || !e.complete" @click="saveToLibrary(e)"><Icon icon="floppy-disk" /></button>
           <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                   :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
-                  :title="t('cache.delete')" :disabled="rowBusy[e.id] || e.downloading" @click="remove(e)">🗑</button>
+                  :title="t('cache.delete')" :disabled="rowBusy[e.id] || e.downloading" @click="remove(e)"><Icon icon="trash-can" /></button>
         </div>
       </li>
     </ul>

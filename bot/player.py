@@ -446,6 +446,24 @@ class PlayerMixin:
                 self.interrupt()  # 停掉正在放的,主循环随后 next() 落到原来的下一首
         return removed
 
+    def remove_group_from_queue(self, key):
+        """把队列里同一组(一次入队的整张歌单)全部删掉。返回删掉的条数。"""
+        playlist = var.playlist
+        with playlist.playlist_lock:
+            indexes = [i for i, w in enumerate(playlist)
+                       if (getattr(w, 'group', None) or {}).get('key') == key]
+            if not indexes:
+                return 0
+            current = playlist.current_index
+            # 倒序删,前面的下标不受影响;当前曲留到最后按"删当前曲"的规则处理
+            for index in reversed(indexes):
+                if index != current:
+                    playlist.remove(index)
+            removing_current = current in indexes
+        if removing_current:
+            self.remove_from_queue(playlist.current_index)
+        return len(indexes)
+
     def _download(self, item):
         try:
             ver = item.version

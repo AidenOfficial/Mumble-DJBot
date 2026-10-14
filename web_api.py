@@ -7,6 +7,7 @@ without a circular import.
 """
 
 import base64
+import hashlib
 import time
 
 from flask import Blueprint, Response, abort, jsonify, request
@@ -149,6 +150,7 @@ def _queue_move(src, dst):
             return
         wrapper = list.pop(playlist, src)
         list.insert(playlist, dst, wrapper)
+        _leave_group_if_detached(playlist, dst)
         ci = playlist.current_index
         if src == ci:
             playlist.current_index = dst
@@ -159,12 +161,42 @@ def _queue_move(src, dst):
         playlist.version += 1
 
 
+def _group_key(wrapper):
+    return (getattr(wrapper, 'group', None) or {}).get('key')
+
+
+def _leave_group_if_detached(playlist, index):
+    """单曲被拖出了它所在的歌单(前后都不是同组):不再算这组的,单独显示。"""
+    key = _group_key(playlist[index])
+    if not key:
+        return
+    neighbours = [playlist[i] for i in (index - 1, index + 1) if 0 <= i < len(playlist)]
+    if not any(_group_key(w) == key for w in neighbours):
+        playlist[index].group = None
+
+
 def _queue_remove(index):
     """Remove the index-th queue item; shared with chat !rm and the legacy /post."""
     playlist = var.playlist
     if not (0 <= index < len(playlist)):
         abort(400)
     var.bot.remove_from_queue(index)
+
+
+def _search_result_url(source, url, video_id=None):
+    """搜索结果 -> 真正入队用的链接(B 站统一成 av 号链接,和其他入口一致)。"""
+    url = (url or '').strip()
+    if source == 'bilibili':
+        url = util.get_bilibili_url_from_input(video_id or url)
+    return url
+
+
+def _search_item_id(result):
+    try:
+        url = _search_result_url(result.get('source'), result.get('url'), result.get('id'))
+    except Exception:
+        return ''
+    return hashlib.md5(url.encode()).hexdigest() if url else ''
 
 
 def create_blueprint(requires_auth):
@@ -222,6 +254,9 @@ def create_blueprint(requires_auth):
             except Exception:
                 continue
             summary['is_current'] = index == current_index
+            group = getattr(wrapper, 'group', None)
+            summary['group'] = {'key': group.get('key'), 'name': group.get('name', ''),
+                                'kind': group.get('kind', 'playlist')} if group else None
             items.append(summary)
         return jsonify({
             'items': items,
@@ -232,8 +267,8 @@ def create_blueprint(requires_auth):
     @api.route('/queue', methods=['POST'])
     @requires_auth
     def api_queue_edit():
-        """Queue edits. Body: {"action": "move"|"top"|"remove"|"play"|"clear",
-        with "index" (and "to" for move)}."""
+        """Queue edits. Body: {"action": "move"|"top"|"remove"|"play"|"clear"|"remove_group",
+        with "index" (and "to" for move, "group" for remove_group)}."""
         payload = request.get_json(silent=True) or request.form
         action = payload.get('action') if payload else None
         if not action:
@@ -258,6 +293,10 @@ def create_blueprint(requires_auth):
             var.bot.play(index)
         elif action == 'clear':
             var.bot.clear()
+        elif action == 'remove_group':
+            key = str(payload.get('group') or '')
+            if not key or not var.bot.remove_group_from_queue(key):
+                abort(400)
         else:
             abort(400)
         return jsonify(_status_payload())
@@ -273,6 +312,9 @@ def create_blueprint(requires_auth):
         except (TypeError, ValueError):
             limit = 6
         results, failed = web_search.unified_search(query, limit)
+        for result in results:
+            # 和 /search/add 入队后的条目同一个 id,前端据此画收藏 ♥
+            result['item_id'] = _search_item_id(result)
         return jsonify({'query': query, 'results': results, 'failed': failed})
 
     @api.route('/search/add', methods=['POST'])
@@ -283,10 +325,7 @@ def create_blueprint(requires_auth):
         payload = request.get_json(silent=True) or request.form
         if not payload:
             abort(400)
-        source = payload.get('source')
-        url = (payload.get('url') or '').strip()
-        if source == 'bilibili':
-            url = util.get_bilibili_url_from_input(payload.get('id') or url)
+        url = _search_result_url(payload.get('source'), payload.get('url'), payload.get('id'))
         if not url or not url.lower().startswith(('http://', 'https://')):
             abort(400)
         music_wrapper = get_cached_wrapper_from_scrap(

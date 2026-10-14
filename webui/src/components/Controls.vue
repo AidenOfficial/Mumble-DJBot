@@ -43,8 +43,7 @@ const MODES = ['one-shot', 'repeat', 'single', 'random', 'autoplay']
         :title="status?.play ? t('ctl.pause') : t('ctl.play')"
         @click="togglePlay"
       >
-        <svg v-if="status?.play" viewBox="0 0 24 24" class="h-6 w-6" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
-        <svg v-else viewBox="0 0 24 24" class="h-6 w-6" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+        <Icon :icon="status?.play ? 'pause' : 'play'" class="text-xl" :class="{ 'translate-x-px': !status?.play }" />
       </button>
       <button
         class="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0"
@@ -52,15 +51,13 @@ const MODES = ['one-shot', 'repeat', 'single', 'random', 'autoplay']
         :title="t('ctl.skip')"
         @click="control({ action: 'skip' })"
       >
-        <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor"><path d="M6 6l8.5 6L6 18V6zM16 6h2v12h-2z" /></svg>
+        <Icon icon="forward-step" class="text-lg" />
       </button>
     </div>
 
     <!-- volume -->
     <div class="flex w-full max-w-xs items-center gap-3">
-      <svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0" fill="currentColor" :style="{ color: 'var(--c-text-muted)' }">
-        <path d="M3 10v4h4l5 5V5L7 10H3z" />
-      </svg>
+      <Icon icon="volume-low" class="shrink-0 text-sm" :style="{ color: 'var(--c-text-muted)' }" />
       <input
         v-model.number="volume"
         type="range"

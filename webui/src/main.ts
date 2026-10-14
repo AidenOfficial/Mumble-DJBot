@@ -1,10 +1,12 @@
 import { createApp } from 'vue'
 import './style.css'
 import App from './App.vue'
+import { Icon } from './icons'
 
 import { reportClientError } from './api'
 
 const app = createApp(App)
+app.component('Icon', Icon)
 // 组件里抛出的错误 + 全局未捕获错误都报给后端,在 设置 → 日志 里能看到
 app.config.errorHandler = (err, _instance, info) => {
   console.error(err)

@@ -357,10 +357,15 @@ class URLItem(BaseItem):
                 except:
                     error_traceback = traceback.format_exc().split("During")[0]
                     error = error_traceback.rstrip().split("\n")[-1]
-                    self.log.error("bot: download failed with error:\n %s" % error)
-                    # 不删已下载的部分:下一次尝试从断点续传(边下边播时正在播放的也是这个文件)
+                    # 还有重试机会时只记 WARNING:YouTube 偶发 403 换备用客户端基本都能下来,
+                    # 不该在日志里堆一串 ERROR;最后一次也失败才算错误
                     if i + 1 < attempts:
+                        self.log.warning("bot: download attempt %d / %d failed, retrying: %s",
+                                         i + 1, attempts, error)
+                        # 不删已下载的部分:下一次尝试从断点续传(边下边播时正在播放的也是这个文件)
                         time.sleep(min(2 ** i, 8))
+                    else:
+                        self.log.error("bot: download failed with error:\n %s" % error)
 
             if download_succeed:
                 try:

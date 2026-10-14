@@ -31,8 +31,16 @@ export interface PrepStatus {
   target_secs: number
 }
 
+/** 整张歌单一起入队时的分组(队列里折叠显示) */
+export interface QueueGroup {
+  key: string
+  name: string
+  kind: 'playlist' | 'url_playlist' | string
+}
+
 export interface QueueItem extends CurrentItem {
   is_current: boolean
+  group: QueueGroup | null
 }
 
 export interface BotStatus {
@@ -89,6 +97,7 @@ export const postControls = (body: ControlAction) => postJson<BotStatus>('/api/c
 export type QueueAction =
   | { action: 'remove' | 'top' | 'play'; index: number }
   | { action: 'move'; index: number; to: number }
+  | { action: 'remove_group'; group: string }
   | { action: 'clear' }
 
 export const postQueue = (body: QueueAction) => postJson<BotStatus>('/api/queue', body)
@@ -131,6 +140,8 @@ export async function saveAlias(alias: string): Promise<Me> {
 export interface PlaylistSummary {
   id: number
   name: string
+  /** 收藏歌单("我喜欢的音乐",和聊天里的 !fav 同一张);只有自己的歌单才有 */
+  favorites?: boolean
   count: number
   total_duration: number
   updated_at: number
@@ -155,6 +166,8 @@ export interface PlaylistDetail {
   public: boolean
   /** false = 别人的公开歌单(只读) */
   mine: boolean
+  /** 收藏歌单("我喜欢的音乐") */
+  favorites?: boolean
   owner_name?: string
 }
 
@@ -199,6 +212,17 @@ export const playPlaylist = (
   id: number,
   body: { mode: 'append' | 'next' | 'replace'; shuffle?: boolean; item?: number },
 ) => send<BotStatus & { queued: number; skipped: number }>('POST', `/api/playlists/${id}/play`, body)
+
+// ---- 收藏(我喜欢的音乐) ------------------------------------------------
+
+export interface FavoritesState {
+  playlist_id: number | null
+  item_ids: string[]
+}
+
+export const fetchFavorites = () => getJson<FavoritesState>('/api/favorites')
+export const setFavorite = (src: PlaylistSource, favorite: boolean) =>
+  send<FavoritesState>('POST', '/api/favorites', { ...src, favorite })
 
 // ---- 缓存管理 -----------------------------------------------------------
 

@@ -11,7 +11,7 @@ const open = ref(false)
 const draft = ref('')
 const saving = ref(false)
 const message = ref('')
-const messageOk = ref(false) // 颜色靠这个判断,不再看文案里有没有 ✓
+const messageOk = ref(false) // 成功时显示勾和绿色
 const root = ref<HTMLElement | null>(null)
 
 const initial = computed(() => (me.value?.display_name || '?').trim().charAt(0).toUpperCase())
@@ -161,7 +161,7 @@ const SOURCE_LABEL: Record<string, Key> = {
           >{{ t('common.save') }}</button>
         </form>
         <div class="mt-2 flex items-center justify-between">
-          <span class="text-xs" :style="{ color: messageOk ? 'var(--c-success)' : 'var(--c-danger)' }">{{ message }}</span>
+          <span class="text-xs" :style="{ color: messageOk ? 'var(--c-success)' : 'var(--c-danger)' }"><Icon v-if="messageOk" icon="check" class="mr-1" />{{ message }}</span>
           <button
             v-if="me?.alias"
             class="cursor-pointer border-0 bg-transparent p-0 text-xs underline"
@@ -175,7 +175,7 @@ const SOURCE_LABEL: Record<string, Key> = {
           <p class="text-xs font-medium" :style="{ color: 'var(--c-text-muted)' }">{{ t('me.mumble') }}</p>
           <template v-if="me?.mumble">
             <div class="mt-1 flex items-center justify-between">
-              <span class="text-sm">🎧 {{ me.mumble.mumble_name }}</span>
+              <span class="text-sm"><Icon icon="headphones" class="mr-1.5" :style="{ color: 'var(--c-accent)' }" />{{ me.mumble.mumble_name }}</span>
               <button class="cursor-pointer border-0 bg-transparent p-0 text-xs underline"
                       :style="{ color: 'var(--c-text-muted)' }" @click="unlink">{{ t('me.unlink') }}</button>
             </div>
@@ -191,7 +191,7 @@ const SOURCE_LABEL: Record<string, Key> = {
               :style="{ background: 'var(--c-bg)', color: 'var(--c-text)' }"
               :title="t('me.copy')"
               @click="copyCommand"
-            >{{ bind.command }}<span class="font-sans text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ t(copied ? 'me.copied' : 'me.copy') }}</span></button>
+            >{{ bind.command }}<span class="font-sans text-[11px]" :style="{ color: 'var(--c-text-faint)' }"><Icon v-if="copied" icon="check" class="mr-1" />{{ t(copied ? 'me.copied' : 'me.copy') }}</span></button>
             <p class="mt-1 text-[11px]" :style="{ color: 'var(--c-text-faint)' }">{{ t('me.validFor') }}</p>
           </template>
           <button
@@ -200,7 +200,7 @@ const SOURCE_LABEL: Record<string, Key> = {
             :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
             @click="startBind"
           >{{ t('me.link') }}</button>
-          <p v-if="bindMsg" class="mt-1 text-xs" :style="{ color: bindOk ? 'var(--c-success)' : 'var(--c-text-muted)' }">{{ bindMsg }}</p>
+          <p v-if="bindMsg" class="mt-1 text-xs" :style="{ color: bindOk ? 'var(--c-success)' : 'var(--c-text-muted)' }"><Icon v-if="bindOk" icon="check" class="mr-1" />{{ bindMsg }}</p>
         </div>
       </template>
       <template v-else>

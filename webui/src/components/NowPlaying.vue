@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { formatBytes, thumbnailUrl } from '../api'
 import Controls from './Controls.vue'
 import AddToPlaylist from './AddToPlaylist.vue'
+import FavButton from './FavButton.vue'
 import PrepPanel from './PrepPanel.vue'
 import { formatTime, useStatus } from '../composables/useStatus'
 import { modeLabel, t, typeLabel } from '../i18n'
@@ -54,9 +55,7 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
         class="flex h-full w-full items-center justify-center"
         :style="{ background: 'linear-gradient(135deg, var(--c-accent-soft), var(--c-surface-2))' }"
       >
-        <svg viewBox="0 0 24 24" class="h-20 w-20 opacity-40" fill="currentColor" aria-hidden="true">
-          <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
-        </svg>
+        <Icon icon="music" class="text-7xl opacity-40" aria-hidden="true" />
       </div>
     </div>
 
@@ -79,7 +78,8 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
             :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
           >{{ sourceLabel }}</span>
           <span v-if="current.artist && current.artist !== '??'">{{ current.artist }}</span>
-          <AddToPlaylist :source="{ source: 'current' }" :label="t('np.save')" />
+          <FavButton :item-id="current.id" :source="{ source: 'library', item_id: current.id }" :label="t('np.save')" />
+          <AddToPlaylist :source="{ source: 'current' }" :label="t('atp.header')" />
         </p>
       </template>
       <template v-else>
@@ -131,12 +131,12 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
         <span>{{ current.duration ? formatTime(current.duration) : '--:--' }}</span>
       </div>
       <p v-if="current.download" class="mt-1 text-center text-[11px] tabular-nums" :style="{ color: 'var(--c-text-faint)' }">
-        {{ t('np.bgDownload', { pct: Math.round(current.download.progress * 100) }) }}<template
+        <Icon icon="download" class="mr-1" />{{ t('np.bgDownload', { pct: Math.round(current.download.progress * 100) }) }}<template
           v-if="current.download.speed"> · {{ formatBytes(current.download.speed) }}/s</template><template
           v-if="current.download.eta"> · {{ t('np.bgDone', { eta: formatTime(current.download.eta) }) }}</template>
       </p>
       <p v-if="skipBlocks.length" class="mt-1 text-center text-[11px]" :style="{ color: 'var(--c-text-faint)' }">
-        {{ t('np.skipping', { n: skipBlocks.length }) }}
+        <Icon icon="forward-step" class="mr-1" />{{ t('np.skipping', { n: skipBlocks.length }) }}
       </p>
     </div>
 

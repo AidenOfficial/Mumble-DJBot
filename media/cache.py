@@ -69,7 +69,9 @@ class MusicCache(dict):
         if music_dicts:
             for music_dict in music_dicts:
                 id = music_dict['id']
-                self[id] = dict_to_item(music_dict)
+                # 已缓存的对象可能正在下载/播放,不能用库里的旧快照顶替
+                if id not in self:
+                    self[id] = dict_to_item(music_dict)
                 items.append(self[id])
 
         return items
@@ -83,8 +85,11 @@ class MusicCache(dict):
             return None
 
     def save(self, id):
-        self.log.debug("library: music save into database: %s" % self[id].format_debug_string())
-        self.db.insert_music(self[id].to_dict())
+        self.save_item(self[id])
+
+    def save_item(self, item):
+        self.log.debug("library: music save into database: %s" % item.format_debug_string())
+        self.db.insert_music(item.to_dict())
         self.db.manage_special_tags()
 
     def free_and_delete(self, id):
@@ -142,6 +147,8 @@ class CachedItemWrapper:
         self.type = type
         self.log = logging.getLogger("bot")
         self.version = 0
+        # 整张歌单一起入队时打的分组标记(队列里折叠成一个歌单显示),见 tag_group()
+        self.group = None
 
     def item(self):
         if self.id in self.lib:
@@ -154,19 +161,32 @@ class CachedItemWrapper:
         dict['user'] = self.user
         return dict
 
+    # 校验 / 下载可能要几十秒,期间清空队列、一次性模式播完、换歌单播放都会把条目
+    # 移出缓存。全程只用开始时拿到的那个对象,结束后不再回头查缓存
+    # (以前这里会 ItemNotCachedError,日志里就是 "unexpected error while downloading")。
     def validate(self):
-        ret = self.item().validate()
-        if ret and self.item().version > self.version:
-            self.version = self.item().version
-            self.lib.save(self.id)
+        item = self.item()
+        ret = item.validate()
+        if ret:
+            self._sync(item)
         return ret
 
     def prepare(self):
-        ret = self.item().prepare()
-        if ret and self.item().version > self.version:
-            self.version = self.item().version
-            self.lib.save(self.id)
+        item = self.item()
+        ret = item.prepare()
+        if ret:
+            self._sync(item)
         return ret
+
+    def _sync(self, item):
+        if item.version <= self.version:
+            return
+        self.version = item.version
+        if self.lib.get(self.id) is item:
+            self.lib.save_item(item)
+        else:
+            # 已被移出缓存(或换成了别的对象):不再写库,免得把刚删掉的条目又写回去
+            self.log.debug("library: %s left the cache while preparing, not saved", self.id[:7])
 
     def uri(self):
         return self.item().uri()
@@ -219,9 +239,22 @@ class CachedItemWrapper:
 # Remember!!! Get wrapper functions will automatically add items into the cache!
 def get_cached_wrapper(item, user):
     if item:
-        var.cache[item.id] = item
+        # 同一首已经在缓存里(在队列里、正在下载)时沿用那个对象:库里读出来的是旧快照,
+        # 顶替掉会让正在进行的下载"丢失",主循环又从头下一遍
+        if item.id not in var.cache:
+            var.cache[item.id] = item
         return CachedItemWrapper(var.cache, item.id, item.type, user)
     return None
+
+
+def tag_group(wrappers, name, kind='playlist', ref=None):
+    """把一批一起入队的条目标成同一组:Web 队列里折叠成一个歌单,而不是一长串单曲。
+    每次入队都是新的一组(同一歌单播两次就是两组)。"""
+    import uuid
+    group = {'key': uuid.uuid4().hex[:12], 'name': str(name or '')[:200], 'kind': kind, 'ref': ref}
+    for wrapper in wrappers:
+        wrapper.group = group
+    return wrappers
 
 def get_cached_wrappers(items, user):
     wrappers = []

@@ -4,6 +4,7 @@ import { formatBytes } from '../api'
 import { uploadFile, UploadError } from '../upload'
 import { useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
+import FavButton from './FavButton.vue'
 import { t, typeLabel } from '../i18n'
 import type { Key } from '../i18n/en'
 
@@ -79,10 +80,10 @@ async function add(item: LibItem, next: boolean) {
         next ? { add_item_next: item.id } : { add_item_bottom: item.id }),
     })
     if (!rv.ok) throw new Error(String(rv.status))
-    feedback.value[item.id] = '✓'
+    feedback.value[item.id] = 'ok'
     refresh()
   } catch {
-    feedback.value[item.id] = '✗'
+    feedback.value[item.id] = 'err'
   }
   setTimeout(() => delete feedback.value[item.id], 2000)
 }
@@ -193,7 +194,7 @@ const TYPES = ['', 'file', 'url', 'radio'] as const
           class="ml-auto cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium"
           :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
         >
-          {{ t('lib.upload') }}
+          <Icon icon="upload" class="mr-1" />{{ t('lib.upload') }}
           <input type="file" accept="audio/*,video/*,.mkv,.flv" multiple class="hidden" @change="onUpload" />
         </label>
       </div>
@@ -208,12 +209,12 @@ const TYPES = ['', 'file', 'url', 'radio'] as const
               <template v-else-if="u.phase === 'processing'">{{ t('lib.processing') }}</template>
             </span>
             <button v-if="u.phase === 'uploading'" class="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-xs"
-                    :style="{ color: 'var(--c-text-faint)' }" :title="t('common.cancel')" @click="u.ctrl.abort()">✕</button>
+                    :style="{ color: 'var(--c-text-faint)' }" :title="t('common.cancel')" @click="u.ctrl.abort()"><Icon icon="xmark" /></button>
             <button v-if="u.phase === 'done' && u.itemId && !u.queued"
                     class="shrink-0 cursor-pointer rounded-md border-0 px-2 py-0.5 text-xs font-semibold"
                     :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
-                    @click="queueUpload(u)">{{ t('common.queue') }}</button>
-            <span v-if="u.queued" class="shrink-0" :style="{ color: 'var(--c-accent)' }">{{ t('common.queued') }}</span>
+                    @click="queueUpload(u)"><Icon icon="plus" class="mr-1" />{{ t('common.queue') }}</button>
+            <span v-if="u.queued" class="shrink-0" :style="{ color: 'var(--c-accent)' }"><Icon icon="check" class="mr-1" />{{ t('common.queued') }}</span>
           </div>
           <div v-if="u.phase === 'uploading' || u.phase === 'processing'" class="mt-1.5 h-1 w-full overflow-hidden rounded-full"
                :style="{ background: 'var(--c-surface-2)' }">
@@ -237,7 +238,7 @@ const TYPES = ['', 'file', 'url', 'radio'] as const
         <div class="h-10 w-10 shrink-0 overflow-hidden rounded-lg" :style="{ background: 'var(--c-surface-2)' }">
           <img v-if="item.thumb && item.thumb.startsWith('data:')" :src="item.thumb" alt="" class="h-full w-full object-cover" />
           <div v-else class="flex h-full w-full items-center justify-center opacity-40">
-            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" /></svg>
+            <Icon icon="music" />
           </div>
         </div>
         <div class="min-w-0 flex-1">
@@ -248,21 +249,27 @@ const TYPES = ['', 'file', 'url', 'radio'] as const
           </p>
         </div>
         <div class="flex shrink-0 gap-1">
-          <span v-if="feedback[item.id]" class="px-2 py-1 text-xs" :style="{ color: 'var(--c-accent)' }">{{ feedback[item.id] }}</span>
+          <span v-if="feedback[item.id]" class="px-2 py-1 text-xs"
+                :style="{ color: feedback[item.id] === 'err' ? 'var(--c-danger)' : 'var(--c-accent)' }">
+            <Icon v-if="feedback[item.id] === 'ok'" icon="check" />
+            <Icon v-else-if="feedback[item.id] === 'err'" icon="xmark" />
+            <template v-else>...</template>
+          </span>
           <template v-else>
+            <FavButton :item-id="item.id" :source="{ source: 'library', item_id: item.id }" />
             <AddToPlaylist :source="{ source: 'library', item_id: item.id }" />
             <button
               class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
               :title="t('common.playNext')"
               @click="add(item, true)"
-            >{{ t('lib.next') }}</button>
+            ><Icon icon="arrow-turn-up" class="mr-1" />{{ t('lib.next') }}</button>
             <button
               class="cursor-pointer rounded-md border-0 px-2.5 py-1 text-xs font-semibold"
               :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
               :title="t('common.addToQueue')"
               @click="add(item, false)"
-            >{{ t('common.queue') }}</button>
+            ><Icon icon="plus" class="mr-1" />{{ t('common.queue') }}</button>
           </template>
         </div>
       </li>
@@ -278,14 +285,14 @@ const TYPES = ['', 'file', 'url', 'radio'] as const
         :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
         :disabled="page <= 1"
         @click="query(page - 1)"
-      >{{ t('lib.prev') }}</button>
+      ><Icon icon="angle-left" class="mr-1" />{{ t('lib.prev') }}</button>
       <span class="tabular-nums" :style="{ color: 'var(--c-text-muted)' }">{{ page }} / {{ totalPages }}</span>
       <button
         class="cursor-pointer rounded-full border-0 px-3 py-1.5"
         :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
         :disabled="page >= totalPages"
         @click="query(page + 1)"
-      >{{ t('lib.nextPage') }}</button>
+      >{{ t('lib.nextPage') }}<Icon icon="angle-right" class="ml-1" /></button>
     </div>
   </section>
 </template>

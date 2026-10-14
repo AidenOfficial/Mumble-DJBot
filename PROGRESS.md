@@ -202,6 +202,31 @@ pyflakes、真实 ffmpeg、桩后端 + Playwright 截图/交互。
 2. 长视频边下边播时 `!repeat`:不中断、不卡在"等待准备"。
 3. 暂停时连按 3 次以上 `!skip` 再 `!play`:能开始下载并播放。
 
+## 第五轮(2026-10-14):图标统一、收藏入口、队列歌单分组、日志错误
+
+- **日志 "unexpected error while downloading"**:下载要几秒到几十秒,期间清空队列 / one-shot 播完 /
+  歌单"立即播放"会把条目移出缓存,下载结束后 `CachedItemWrapper.prepare()` 回头查缓存抛
+  `ItemNotCachedError`。现在全程用开始时拿到的对象,已移出缓存的不再写库。另外
+  `get_cached_wrapper()` 不再用库里的旧快照顶替缓存中正在下载的对象(会导致重复下载)。
+  YouTube 偶发 403 在还有重试机会时记 WARNING,最后一次失败才是 ERROR。
+- **聊天点歌卡顿约 1 秒**:pymumble 2.x 在自己的主循环线程里同步执行回调,发音频包也在这个线程。
+  命令改由 `CommandWorker` 线程按顺序处理,回调只入队。
+- **队列里的歌单分组**:整张歌单入队(网页、`!mylist`、`!playlist`)打同一个 group;`/api/queue`
+  带 group,`remove_group` 整组移除,拖出组的单曲自动脱离;group 随队列一起持久化。
+- **占位标题**:歌单里还没读信息的链接先用歌单存的标题 / 时长;歌单详情里标题还是链接的条目,
+  用缓存 / 曲库里已有的标题补上并写回。
+- **收藏**:`/api/favorites`(GET 列表、POST 切换),落在名为 Favorites 的歌单(与 `!fav` 共用)。
+- **Web UI**:emoji / 特殊符号全部换成 FontAwesome 7(SVG core 按需打包);新增心形一键收藏;
+  歌单页置顶"我喜欢的音乐";队列折叠歌单分组。
+- 测试:新增 tests/test_queue_groups.py(17 条),全量 316 passed。前端 vue-tsc + 构建通过,
+  Playwright 对假后端截图检查了队列分组 / 收藏 / 歌单页(亮暗两色)。
+
+### 待本机复验(第五轮)
+1. 播放中在 Mumble 聊天框连续点几首歌:音乐不再卡顿。
+2. 网页歌单"立即播放"一个大歌单:队列里只出现一行歌单,展开能看到歌曲;中途清空队列不再出现
+   "unexpected error while downloading"。
+3. 重启 bot 后队列里的歌单分组还在。
+
 ## DECISIONS 待决区
 
 ### ⚠️ push 被 403 拒绝(需要用户处理)
