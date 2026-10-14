@@ -25,6 +25,10 @@ def make_config():
 class Base(unittest.TestCase):
     def setUp(self):
         import media.url  # noqa: F401  注册 url 类型
+        # _download 会起后台线程联网抓封面,线程活过本测试后会写进下一个测试的 tmp 目录
+        patcher = mock.patch('media.url.artwork.ensure')
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self._saved = {n: getattr(var, n, None) for n in ('config', 'tmp_folder', 'db', 'music_db', 'playlist', 'cache')}
         var.config = make_config()
