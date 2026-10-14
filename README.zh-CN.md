@@ -126,10 +126,12 @@ client_id =
 client_secret =
 ```
 
-### 3. 构建并启动
+### 3. 拉取镜像并启动
+
+镜像由 GitHub Actions 构建并发布到 `ghcr.io/aidenofficial/mumble-djbot`（公开；`edge` 跟随 `master`），部署机上无需构建。如需从源码构建，参见 `docker-compose.build.yml`。
 
 ```bash
-docker compose build
+docker compose pull
 docker compose up -d
 docker compose logs -f
 ```

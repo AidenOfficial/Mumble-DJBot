@@ -94,14 +94,20 @@ client_secret = <你的 Spotify Client Secret>
 
 ---
 
-## 五、第 3 步:构建并启动
+## 五、第 3 步:拉取镜像并启动
+
+镜像由 GitHub Actions 自动构建并发布到 `ghcr.io/aidenofficial/mumble-djbot`
+(`master` 每次推送更新 `edge` 标签,公开可拉取,无需登录),NAS 上不用再构建。
 
 ```bash
 cd <项目目录>
-docker compose build      # 首次构建,需联网,约几分钟
+docker compose pull       # 拉取镜像,需联网
 docker compose up -d      # 后台启动
 docker compose logs -f    # 查看实时日志
 ```
+
+想固定某个发布版本,在 `<项目目录>/.env` 写 `BAM_IMAGE=ghcr.io/aidenofficial/mumble-djbot:1.2.3`。
+从本地源码构建见 `docker-compose.build.yml` 开头的说明。
 
 日志里应能看到连接成功、加入频道。然后用你自己的 Mumble 客户端进同一个频道,
 发文字命令测试:`!help`、`!bili <B站链接>`、`!spotify <歌名>`、`!queue`、`!skip`。
@@ -141,7 +147,8 @@ SSH 里执行 `crontab -e`,加一行(每天凌晨 5 点重启):
 | 停止 | `docker compose stop` |
 | 再启动 | `docker compose up -d` |
 | 改完 `configuration.ini` 生效 | `docker compose restart` |
-| 改了机器人代码后 | `docker compose up -d --build` |
+| 更新到最新版 | `docker compose pull && docker compose up -d` |
+| 用本地源码构建 | `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build` |
 | 进容器内部排查 | `docker exec -it mumble-music bash` |
 
 **数据持久化**:`configuration.ini`、`data/`(状态数据库、Web 用户别名与个人歌单)、
@@ -149,7 +156,7 @@ SSH 里执行 `crontab -e`,加一行(每天凌晨 5 点重启):
 `spotdl_cache/`(Spotify 下载缓存)都挂载在 `<项目目录>` 下,容器删除重建都不会丢。
 
 > 从旧版本升级:`cache/` 是新加的挂载(以前缓存在容器内的 `/tmp`,每次重建都清空)。
-> `docker compose up -d --build` 时 Docker 会自动建好这个目录。缓存上限默认 4GB,
+> `docker compose up -d` 时 Docker 会自动建好这个目录。缓存上限默认 4GB,
 > 在 Web UI 的 **Cache** 页查看占用、固定常听的歌、手动释放空间。
 
 ---
@@ -162,7 +169,7 @@ SSH 里执行 `crontab -e`,加一行(每天凌晨 5 点重启):
 
 **容器起不来,日志报 `exec format error` 或 bad interpreter**
 - `entrypoint.sh` 换行符问题。`Dockerfile` 已用 `sed` 自动修复,正常不会遇到;
-  若仍出现,`docker compose build --no-cache` 重新构建。
+  若仍出现,`docker compose pull` 重新拉取镜像。
 
 **机器人连不上 Mumble 服务器**
 - 核对 `[server]` 的 host / port / password。容器默认 bridge 网络,

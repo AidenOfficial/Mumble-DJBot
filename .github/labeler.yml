@@ -30,7 +30,7 @@
       - any-glob-to-any-file:
           - Dockerfile
           - .dockerignore
-          - docker-compose.yml
+          - docker-compose*.yml
           - entrypoint.sh
           - deploy/**
           - "configuration*.ini"

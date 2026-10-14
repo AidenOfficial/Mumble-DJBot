@@ -2,10 +2,11 @@
 # 完整使用说明见 deploy/DOCKER.md
 services:
   botamusique:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: mumble-music:latest
+    # 用 GitHub Actions 构建好的镜像(master 每次推送自动发布 edge 标签,公开可拉取)。
+    # 更新:docker compose pull && docker compose up -d
+    # 固定版本:在 .env 写 BAM_IMAGE=ghcr.io/aidenofficial/mumble-djbot:1.2.3
+    # 从本地源码构建:见 docker-compose.build.yml
+    image: ${BAM_IMAGE:-ghcr.io/aidenofficial/mumble-djbot:edge}
     container_name: mumble-music
     restart: unless-stopped
     init: true

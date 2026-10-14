@@ -16,8 +16,8 @@
 `client_id` / `client_secret`),然后:
 
 ```bash
-# 1. 构建镜像(与正式部署同一个镜像)
-docker compose build
+# 1. 拉取镜像(与正式部署同一个镜像)
+docker compose pull
 
 # 2. 先做不下载的快速检查(工具齐全性 + B 站/Spotify 解析)
 docker compose run --rm --entrypoint venv/bin/python botamusique scripts/smoke_test.py

@@ -11,7 +11,7 @@ media.spotify.download_tracks),而不是另写一套,所以通过即代表机器
 对应功能可用。
 
 在 NAS 上(Docker)运行:
-    docker compose build
+    docker compose pull
     docker compose run --rm --entrypoint venv/bin/python \
         botamusique scripts/smoke_test.py
 

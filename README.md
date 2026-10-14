@@ -127,10 +127,12 @@ client_id =
 client_secret =
 ```
 
-### 3. Build and start
+### 3. Pull and start
+
+The image is built by GitHub Actions and published to `ghcr.io/aidenofficial/mumble-djbot` (public; `edge` tracks `master`), so nothing is built on the host. To build from source instead, see `docker-compose.build.yml`.
 
 ```bash
-docker compose build
+docker compose pull
 docker compose up -d
 docker compose logs -f
 ```
