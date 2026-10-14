@@ -13,7 +13,6 @@ log = logging.getLogger("bot")
 
 
 def get_radio_server_description(url):
-    global log
 
     log.debug("radio: fetching radio server description")
     p = re.compile('(https?://[^/]*)', re.IGNORECASE)
@@ -64,7 +63,6 @@ def get_radio_server_description(url):
 
 
 def get_radio_title(url):
-    global log
 
     log.debug("radio: fetching radio server description")
     try:

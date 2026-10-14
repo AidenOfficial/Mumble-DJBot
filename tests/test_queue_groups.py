@@ -1,6 +1,5 @@
 """整张歌单入队后的分组、网页收藏(♥)、歌单占位标题、下载期间条目被移出缓存、
 聊天命令不在 pymumble 线程里处理。"""
-import configparser
 import os
 import sys
 import tempfile

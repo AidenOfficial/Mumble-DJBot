@@ -23,7 +23,6 @@ from .core import MumbleBot
 
 
 def start_web_interface(addr, port):
-    global formatter
     import interface
 
     # setup logger

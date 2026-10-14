@@ -139,12 +139,3 @@ def cmd_version(bot, user, text, command, parameter):
 # Just for debug use
 def cmd_real_time_rms(bot, user, text, command, parameter):
     bot._display_rms = not bot._display_rms
-
-
-def cmd_loop_state(bot, user, text, command, parameter):
-    print(bot._loop_status)
-
-
-def cmd_item(bot, user, text, command, parameter):
-    var.playlist._debug_print()
-

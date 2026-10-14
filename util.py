@@ -2,11 +2,11 @@
 # coding=utf-8
 
 import hashlib
+import hmac
 import html
 import magic
 import os
 import io
-import stat
 import sys
 import variables as var
 import zipfile
@@ -16,7 +16,6 @@ import ipaddress
 import socket
 import subprocess as sp
 import logging
-from sys import platform
 import traceback
 import requests
 
@@ -94,13 +93,6 @@ def zipdir(files, zipname_prefix=None):
     return zipname
 
 
-def get_user_ban():
-    res = "List of ban hash"
-    for i in var.db.items("user_ban"):
-        res += "<br/>" + i[0]
-    return res
-
-
 # yt-dlp / spotdl 跟着 B 站、YouTube 改版频繁更新;与 entrypoint.sh 的 BAM_UPDATE_ON_START 升级同一组包
 EXTRACTOR_PACKAGES = ('yt-dlp', 'spotdl')
 
@@ -127,146 +119,6 @@ def upgrade_extractors():
         return f"Updated: {html.escape(installed[-1])}<br/>Restart the bot to use the new version."
     return f"{' / '.join(EXTRACTOR_PACKAGES)} already up to date."
 
-
-def pipe_no_wait():
-    """ Generate a non-block pipe used to fetch the STDERR of ffmpeg.
-    """
-
-    if platform == "linux" or platform == "linux2" or platform == "darwin" or platform.startswith("openbsd") or platform.startswith("freebsd"):
-        import fcntl
-        import os
-
-        pipe_rd = 0
-        pipe_wd = 0
-
-        if hasattr(os, "pipe2"):
-            pipe_rd, pipe_wd = os.pipe2(os.O_NONBLOCK)
-        else:
-            pipe_rd, pipe_wd = os.pipe()
-
-            try:
-                fl = fcntl.fcntl(pipe_rd, fcntl.F_GETFL)
-                fcntl.fcntl(pipe_rd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-            except:
-                print(sys.exc_info()[1])
-                return None, None
-        return pipe_rd, pipe_wd
-
-    elif platform == "win32":
-        # https://stackoverflow.com/questions/34504970/non-blocking-read-on-os-pipe-on-windows
-        import msvcrt
-        import os
-
-        from ctypes import windll, byref, wintypes, WinError, POINTER
-        from ctypes.wintypes import HANDLE, DWORD, BOOL
-
-        pipe_rd, pipe_wd = os.pipe()
-
-        LPDWORD = POINTER(DWORD)
-        PIPE_NOWAIT = wintypes.DWORD(0x00000001)
-        ERROR_NO_DATA = 232
-
-        SetNamedPipeHandleState = windll.kernel32.SetNamedPipeHandleState
-        SetNamedPipeHandleState.argtypes = [HANDLE, LPDWORD, LPDWORD, LPDWORD]
-        SetNamedPipeHandleState.restype = BOOL
-
-        h = msvcrt.get_osfhandle(pipe_rd)
-
-        res = windll.kernel32.SetNamedPipeHandleState(h, byref(PIPE_NOWAIT), None, None)
-        if res == 0:
-            print(WinError())
-            return None, None
-        return pipe_rd, pipe_wd
-
-
-class Dir(object):
-    def __init__(self, path):
-        self.name = os.path.basename(path.strip('/'))
-        self.fullpath = path
-        self.subdirs = {}
-        self.files = []
-
-    def add_file(self, file):
-        if file.startswith(self.name + '/'):
-            file = file.replace(self.name + '/', '', 1)
-
-        if '/' in file:
-            # This file is in a subdir
-            subdir = file.split('/')[0]
-            if subdir in self.subdirs:
-                self.subdirs[subdir].add_file(file)
-            else:
-                self.subdirs[subdir] = Dir(os.path.join(self.fullpath, subdir))
-                self.subdirs[subdir].add_file(file)
-        else:
-            self.files.append(file)
-        return True
-
-    def get_subdirs(self, path=None):
-        subdirs = []
-        if path and path != '' and path != './':
-            subdir = path.split('/')[0]
-            if subdir in self.subdirs:
-                searchpath = '/'.join(path.split('/')[1::])
-                subdirs = self.subdirs[subdir].get_subdirs(searchpath)
-                subdirs = list(map(lambda subsubdir: os.path.join(subdir, subsubdir), subdirs))
-        else:
-            subdirs = self.subdirs
-
-        return subdirs
-
-    def get_subdirs_recursively(self, path=None):
-        subdirs = []
-        if path and path != '' and path != './':
-            subdir = path.split('/')[0]
-            if subdir in self.subdirs:
-                searchpath = '/'.join(path.split('/')[1::])
-                subdirs = self.subdirs[subdir].get_subdirs_recursively(searchpath)
-        else:
-            subdirs = list(self.subdirs.keys())
-
-            for key, val in self.subdirs.items():
-                subdirs.extend(map(lambda subdir: key + '/' + subdir, val.get_subdirs_recursively()))
-
-        subdirs.sort()
-        return subdirs
-
-    def get_files(self, path=None):
-        files = []
-        if path and path != '' and path != './':
-            subdir = path.split('/')[0]
-            if subdir in self.subdirs:
-                searchpath = '/'.join(path.split('/')[1::])
-                files = self.subdirs[subdir].get_files(searchpath)
-        else:
-            files = self.files
-
-        return files
-
-    def get_files_recursively(self, path=None):
-        files = []
-        if path and path != '' and path != './':
-            subdir = path.split('/')[0]
-            if subdir in self.subdirs:
-                searchpath = '/'.join(path.split('/')[1::])
-                files = self.subdirs[subdir].get_files_recursively(searchpath)
-        else:
-            files = self.files
-
-            for key, val in self.subdirs.items():
-                files.extend(map(lambda file: key + '/' + file, val.get_files_recursively()))
-
-        return files
-
-    def render_text(self, ident=0):
-        print('{}{}/'.format(' ' * (ident * 4), self.name))
-        for key, val in self.subdirs.items():
-            val.render_text(ident + 1)
-        for file in self.files:
-            print('{}{}'.format(' ' * (ident + 1) * 4, file))
-
-
-# Parse the html from the message to get the URL
 
 def get_url_from_input(string):
     string = string.strip()[:4096]
@@ -469,7 +321,7 @@ def get_media_duration(path):
 
 
 def parse_time(human):
-    match = re.search("(?:(\d\d):)?(?:(\d\d):)?(\d+(?:\.\d*)?)", human, flags=re.IGNORECASE)
+    match = re.search(r"(?:(\d\d):)?(?:(\d\d):)?(\d+(?:\.\d*)?)", human, flags=re.IGNORECASE)
     if match:
         if match[1] is None and match[2] is None:
             return float(match[3])
@@ -493,7 +345,7 @@ def format_time(seconds):
 def parse_file_size(human):
     units = {"B": 1, "KB": 1024, "MB": 1024 * 1024, "GB": 1024 * 1024 * 1024, "TB": 1024 * 1024 * 1024 * 1024,
              "K": 1024, "M": 1024 * 1024, "G": 1024 * 1024 * 1024, "T": 1024 * 1024 * 1024 * 1024}
-    match = re.search("(\d+(?:\.\d*)?)\s*([A-Za-z]+)", human, flags=re.IGNORECASE)
+    match = re.search(r"(\d+(?:\.\d*)?)\s*([A-Za-z]+)", human, flags=re.IGNORECASE)
     if match:
         num = float(match[1])
         unit = match[2].upper()
@@ -512,9 +364,7 @@ def get_salted_password_hash(password):
 
 def verify_password(password, salted_hash, salt):
     hashed = hashlib.pbkdf2_hmac('sha1', password.encode("utf-8"), bytearray.fromhex(salt), 100000)
-    if hashed.hex() == salted_hash:
-        return True
-    return False
+    return hmac.compare_digest(hashed.hex(), salted_hash)
 
 
 def get_supported_language():
@@ -522,7 +372,7 @@ def get_supported_language():
     lang_files = os.listdir(os.path.join(root_dir, 'lang'))
     lang_list = []
     for lang_file in lang_files:
-        match = re.search("([a-z]{2}_[A-Z]{2})\.json", lang_file)
+        match = re.search(r"([a-z]{2}_[A-Z]{2})\.json", lang_file)
         if match:
             lang_list.append(match[1])
 
@@ -543,25 +393,15 @@ def set_logging_formatter(handler: logging.Handler, logging_level):
 
 
 def get_snapshot_version():
-    import subprocess
-    wd = os.getcwd()
-    root_dir = os.path.dirname(__file__)
-    os.chdir(root_dir)
-
-    ver = "unknown"
-    if os.path.exists(os.path.join(root_dir, ".git")):
-        try:
-            ret = subprocess.check_output(["git", "describe", "--tags"]).strip()
-            ver = ret.decode("utf-8")
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            try:
-                with open(os.path.join(root_dir, ".git/refs/heads/master")) as f:
-                    ver = "g" + f.read()[:7]
-            except FileNotFoundError:
-                pass
-
-    os.chdir(wd)
-    return ver
+    """git 检出时返回 tag 或短 commit 号;不是 git 检出(Docker 镜像里没有 .git)就是 unknown。"""
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(os.path.join(root_dir, ".git")):
+        return "unknown"
+    try:
+        ret = sp.check_output(["git", "describe", "--tags", "--always"], cwd=root_dir, stderr=sp.DEVNULL)
+        return ret.decode("utf-8").strip() or "unknown"
+    except (OSError, sp.CalledProcessError):
+        return "unknown"
 
 
 class LoggerIOWrapper(io.TextIOWrapper):
@@ -609,69 +449,6 @@ class VolumeHelper:
 
         # Some dirty trick to stretch the function, to make to be 0 when input is -35 dB
         return (10 ** (dB / 20) - 10 ** (-35 / 20)) / (1 - 10 ** (-35 / 20))
-
-
-def get_size_folder(path):
-    global log
-
-    folder_size = 0
-    for (path, dirs, files) in os.walk(path):
-        for file in files:
-            filename = os.path.join(path, file)
-            try:
-                folder_size += os.path.getsize(filename)
-            except (FileNotFoundError, OSError):
-                continue
-    return int(folder_size / (1024 * 1024))
-
-
-def clear_tmp_folder(path, size):
-    global log
-
-    if size == -1:
-        return
-    elif size == 0:
-        for (path, dirs, files) in os.walk(path):
-            for file in files:
-                filename = os.path.join(path, file)
-                try:
-                    os.remove(filename)
-                except (FileNotFoundError, OSError):
-                    continue
-    else:
-        if get_size_folder(path=path) > size:
-            # Snapshot (mtime, size, path) of the top-level download cache in
-            # one pass. Concurrent threads (parallel downloads, yt-dlp temp
-            # files, the cache cleaner) may delete files while we scan - a
-            # vanished file must be skipped, never crash the download thread.
-            # Subdirectories (e.g. spotify req_* caches) have their own
-            # pruning and are left alone.
-            entries = []
-            try:
-                names = os.listdir(path)
-            except OSError:
-                return
-            for name in names:
-                filename = os.path.join(path, name)
-                try:
-                    st = os.stat(filename)
-                except OSError:
-                    continue
-                if stat.S_ISREG(st.st_mode):
-                    entries.append((st.st_mtime, st.st_size, filename))
-            entries.sort()
-            size_tp = 0
-            for idx, (_mtime, fsize, _fname) in enumerate(entries):
-                size_tp += fsize
-                if int(size_tp / (1024 * 1024)) > size:
-                    log.info("Cleaning tmp folder")
-                    for (_m, _s, f) in entries[:idx]:
-                        log.debug("Removing " + f)
-                        try:
-                            os.remove(f)
-                        except OSError:
-                            continue
-                    return
 
 
 # 已删除、但旧配置文件里可能还留着的配置项:忽略并提示,不当成未知配置拒绝启动

@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import hmac
 import sqlite3
 from functools import wraps
 from flask import Flask, render_template, request, redirect, send_file, send_from_directory, Response, jsonify, \
@@ -93,7 +94,12 @@ def check_auth(username, password):
     password combination is valid.
     """
 
-    if username == var.config.get("webinterface", "user") and password == var.config.get("webinterface", "password"):
+    # 配置里的账号:两项都填了才生效,否则空用户名+空密码的 Basic Auth 也能登录
+    conf_user = var.config.get("webinterface", "user")
+    conf_password = var.config.get("webinterface", "password")
+    if conf_user and conf_password and \
+            hmac.compare_digest((username or "").encode(), conf_user.encode()) and \
+            hmac.compare_digest((password or "").encode(), conf_password.encode()):
         return True
 
     web_users = json.loads(var.db.get("privilege", "web_access", fallback='[]'))

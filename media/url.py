@@ -12,9 +12,7 @@ from io import BytesIO
 from urllib.parse import urlparse
 import base64
 
-import util
 from constants import tr_cli as tr
-import media
 from media import artwork
 import variables as var
 from media.item import BaseItem, item_builders, item_loaders, item_id_generators, ValidationFailedError, \
