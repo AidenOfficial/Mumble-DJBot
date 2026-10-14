@@ -34,10 +34,9 @@ ALBUM_SIZE = 1000          # 向曲库要的专辑封面边长
 MAX_EDGE = 1280            # 存盘时最长边(视频封面 16:9,竖向 720 足够 288px 框的 2x)
 SMALL_EDGE = 100           # 条目 thumbnail(base64)的边长,保持旧行为
 MAX_LOOKUP_DURATION = 900  # 超过 15 分钟基本是合集/串烧,不去找专辑封面
-DURATION_TOLERANCE = 2.0   # 只靠时长确认时允许的误差(秒)
-MAX_CALLS_PER_ITEM = 8     # 每首歌最多查几次曲库
+DURATION_TOLERANCE = 1.5   # 只靠时长确认时允许的误差(秒)
+MAX_CALLS_PER_ITEM = 10    # 每首歌最多查几次曲库
 
-DONE_STATES = ('album', 'video', 'embedded')
 URL_TYPES = ('url', 'url_from_playlist')
 
 _ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
@@ -173,6 +172,16 @@ def key(text):
     return re.sub(r'[\W_]+', '', t)
 
 
+def full_key(text):
+    """同 key(),但保留括号里的内容:"Right Now (Na Na Na)" 的括号是歌名的一部分,
+    "I Knew You Were Trouble (Taylor's Version)" 要和原版区分开。"""
+    t = _base(text)
+    t = re.sub(r'\s+[-–—]\s+.*$', '', t)
+    t = _FEAT.sub('', t)
+    t = re.sub(r'[(\[](?:feat|ft)\.?\s[^)\]]*[)\]]', ' ', t)
+    return re.sub(r'[\W_]+', '', t)
+
+
 def words(text):
     """歌手比较用:保留词边界。"""
     return ' ' + re.sub(r'[\W_]+', ' ', _base(text)).strip() + ' '
@@ -199,9 +208,16 @@ _SKIP = re.compile(
 _VARIANT = re.compile(
     r'live|现场|演唱会|cover|翻唱|翻自|原唱|remix|inst\b|instrumental|off vocal|伴奏|karaoke|カラオケ|'
     r'piano|钢琴|guitar|吉他|acoustic|女声|男声|\bdj\b|dj版|demo|试听|片段|sped up|speed up|slowed|'
-    r'\b8d\b|music box|八音盒|オルゴール|纯音乐|版\)|\bmix\b|extended|rework|bootleg|mashup', re.I)
+    r'\b8d\b|music box|八音盒|オルゴール|纯音乐|版\)|\bmix\b|extended|rework|bootleg|mashup|reimagined|'
+    r're-?recorded|recorded at|\bsessions?\b|unplugged|stripped|orchestral|symphonic|lullaby|8-?bit|'
+    r'\bcovers?\b|tribute|\bvs\.?\b', re.I)
 
-_SEP_DASH = re.compile(r'\s+[-–—~]\s+')
+# "t.A.T.u.- Loves me not":横杠一边有空格就算分隔符("A-ha" 这种两边都没空格的不拆)
+_SEP_DASH = re.compile(r'\s+[-–—~]\s*|\s*[-–—~]\s+')
+
+# 曲库结果的歌手/专辑名里出现这些,是卡拉 OK / 模仿版厂牌(歌手名里的 DJ 之类不算)
+_FAKE = re.compile(r'karaoke|カラオケ|in the style of|made famous|originally performed|tribute|'
+                   r'sound-?alike|翻唱|翻自|伴奏', re.I)
 _SEP_SLASH = re.compile(r'\s*/\s*|\s*\|\s*')
 
 
@@ -225,9 +241,19 @@ def should_skip(title, duration=0):
     return bool(_SKIP.search(unicodedata.normalize('NFKC', title or '')))
 
 
+_TAG_BLOCK = re.compile(r'\[[^\[\]]*\]|【[^【】]*】|〔[^〔〕]*〕|\{[^{}]*\}')
+_PAREN_BLOCK = re.compile(r'\(([^()]*)\)')
+_PAREN_NOISE = re.compile(r'video|audio|visuali[sz]er|lyric|remaster|\bfrom\b|\bost\b|主题曲|片尾|片头|エンディング|'
+                          r'オープニング|主題歌', re.I)
+
+
 def _clean(text):
-    text = _BRACKET_BLOCK.sub(' ', text)
+    # 【】[] 基本都是标签;() 里只有装饰词才去掉,"(Taylor's Version)" "(Na Na Na)" 留着
+    text = _TAG_BLOCK.sub(' ', text)
+    text = _PAREN_BLOCK.sub(lambda m: ' ' if _PAREN_NOISE.search(m.group(1)) or _NOISE.search(m.group(1))
+                            else m.group(0), text)
     text = _NOISE.sub(' ', text)
+    text = re.sub(r'\(\s*\)', ' ', text)
     return re.sub(r'\s+', ' ', text).strip(' -–—~|/:：·・,，')
 
 
@@ -302,29 +328,48 @@ def artist_in(artists, haystack_words):
     return False
 
 
-def is_variant(result_title, video_title):
-    m = _VARIANT.search(_base(result_title))
-    return bool(m) and not re.search(re.escape(m.group(0)), _base(video_title))
+def is_variant(result, video_title):
+    """result 是曲库结果(dict)或歌名。歌名/专辑名带版本标注、歌手是卡拉 OK 厂牌,都算另一个版本。"""
+    if isinstance(result, str):
+        result = {'title': result}
+    video = _base(video_title)
+    for text in (result.get('title'), result.get('album')):
+        m = _VARIANT.search(_base(text))
+        if m and m.group(0) not in video:
+            return True
+    for text in [result.get('album')] + list(result.get('artists') or []):
+        m = _FAKE.search(_base(text))
+        if m and m.group(0) not in video:
+            return True
+    return False
 
 
 def choose_match(results, cand, haystack, duration, video_title):
     """results: [{title, artists, album, duration, image, ...}]。返回可信的那条或 None。"""
-    want = key(cand.track)
+    want, want_full = key(cand.track), full_key(cand.track)
     # 歌名本身不能当成歌手的证据(歌手叫 "Lemon" 的乐队唱的也叫 Lemon)
     hay = haystack.replace(' ' + words(cand.track).strip() + ' ', ' ')
     exact = [r for r in results
-             if key(r.get('title')) == want and not is_variant(r.get('title', ''), video_title)]
+             if want in (key(r.get('title')), full_key(r.get('title'))) or want_full == full_key(r.get('title'))]
+    exact = [r for r in exact if not is_variant(r, video_title)]
     strong = [r for r in exact if artist_in(r.get('artists'), hay)]
     if strong:
-        # 曲库自己的排序大体是热度:优先有专辑名、时长几乎一致的,其次按原顺序
+        # 曲库自己的排序大体是热度:优先括号也对得上的("Taylor's Version" 不配原版),
+        # 再优先有专辑名、时长几乎一致的,其次按原顺序
         def rank(r):
             close = bool(duration and r.get('duration') and abs(r['duration'] - duration) <= 3)
             extra = bool(_BRACKET_BLOCK.search(_base(r.get('title'))))  # "(Remastered)" 之类
-            return (not r.get('album'), not close, extra)
+            return (full_key(r.get('title')) != want_full, not r.get('album'), not close, extra)
         return sorted(strong, key=rank)[0]
     if duration:
+        def conflicts(r):
+            # 标题里写明了歌手,结果的歌手和它是同一种文字却对不上 → 是别人的同名歌
+            # ("Charlie Puth - We Don't Talk Anymore" 不能配 Pablo Cepeda)。
+            # 文字不同(周杰伦 / Jay Chou)才可能是曲库本地化,交给时长判断
+            return bool(cand.artist) and cand.artist.isascii() == ' '.join(r.get('artists') or []).isascii()
         near = [r for r in exact
-                if r.get('duration') and abs(r['duration'] - duration) <= DURATION_TOLERANCE]
+                if r.get('duration') and abs(r['duration'] - duration) <= DURATION_TOLERANCE
+                and full_key(r.get('title')) == want_full and not conflicts(r)]
         singers = {tuple(sorted(key(a) for a in r.get('artists') or [])) for r in near}
         if len(singers) == 1:
             return near[0]
@@ -392,11 +437,25 @@ def _netease_cover(song_id):
     return f"{pic}?param={ALBUM_SIZE}y{ALBUM_SIZE}" if pic else None
 
 
+def _language(query):
+    """按查询文字的语种决定曲库返回哪种语言的名字。不指定时 Deezer 按 IP 所在地本地化,
+    在日本会把 "Bon Jovi - It's My Life" 变成「ボン・ジョヴィ - イッツ・マイ・ライフ」,歌名就对不上了。"""
+    if re.search(r'[\u3040-\u30ff]', query):
+        return 'ja'
+    if re.search(r'[\uac00-\ud7af]', query):
+        return 'ko'
+    if re.search(r'[\u4e00-\u9fff]', query):
+        return 'zh'
+    return 'en'
+
+
 def search_itunes(query):
     country = (var.config.get('bot', 'artwork_itunes_country', fallback='JP') if var.config else 'JP') or 'JP'
-    data = _get_json('itunes', 'https://itunes.apple.com/search', 3.5,
-                     params={'term': query, 'media': 'music', 'entity': 'song', 'limit': 10,
-                             'country': country})
+    params = {'term': query, 'media': 'music', 'entity': 'song', 'limit': 10, 'country': country}
+    if _language(query) == 'en':
+        # 英文歌查美区:JP 商店会把欧美歌手名翻成片假名
+        params.update(country='US', lang='en_us')
+    data = _get_json('itunes', 'https://itunes.apple.com/search', 3.5, params=params)
     return [{
         'title': r.get('trackName') or '',
         'artists': [r.get('artistName') or ''],
@@ -408,7 +467,8 @@ def search_itunes(query):
 
 
 def search_deezer(query):
-    data = _get_json('deezer', 'https://api.deezer.com/search', 0.3, params={'q': query, 'limit': 10})
+    data = _get_json('deezer', 'https://api.deezer.com/search', 0.3, params={'q': query, 'limit': 10},
+                     headers=dict(_HEADERS, **{'Accept-Language': _language(query)}))
     return [{
         'title': r.get('title') or '',
         'artists': [(r.get('artist') or {}).get('name') or ''],
@@ -426,7 +486,8 @@ PROVIDERS_LATIN = [search_deezer, search_itunes, search_netease]
 
 _COMPILATION = re.compile(
     r'greatest hits|best of|\bhits\b|\bvol\.?\s*\d|collection|anthology|now that|various|精选|精選|合辑|合集|'
-    r'群星|金曲|热歌|榜|经典|ベスト', re.I)
+    r'群星|金曲|热歌|榜|经典|ベスト|\bparty\b|workout|fitness|running|\btop\s*\d|\bcharts?\b|ultimate|'
+    r'essentials?\b|playlist|throwback|wedding|\bkids\b', re.I)
 
 
 def is_compilation(match):
@@ -458,29 +519,30 @@ def find_album(meta, providers=None):
     calls = itertools.count()
     queries_done = set()
     fallback = None  # 合辑封面:实在找不到原专辑时才用
-    for cand in cands[:4]:
+    # 先把每个候选的歌名单独查一轮,再带上歌手查:"Passenger | Let Her Go" 拆不出谁是歌手,
+    # 不能让反过来的那个候选("Passenger" 当歌名)先把查询次数用光
+    plan = [(c, c.track) for c in cands[:4]] + [(c, f"{c.artist} {c.track}") for c in cands[:4] if c.artist]
+    for cand, q in plan:
+        if q.lower() in queries_done:
+            continue
+        queries_done.add(q.lower())
         order = providers or (PROVIDERS_LATIN if cand.track.isascii() else PROVIDERS)
-        queries = [cand.track] + ([f"{cand.artist} {cand.track}"] if cand.artist else [])
-        for q in queries:
-            if q.lower() in queries_done:
+        for provider in order:
+            if next(calls) >= MAX_CALLS_PER_ITEM:
+                return _with_image(fallback)
+            try:
+                results = provider(q) or []
+            except Exception:
+                log.debug("artwork: provider failed", exc_info=True)
                 continue
-            queries_done.add(q.lower())
-            for provider in order:
-                if next(calls) >= MAX_CALLS_PER_ITEM:
-                    return _with_image(fallback)
-                try:
-                    results = provider(q) or []
-                except Exception:
-                    log.debug("artwork: provider failed", exc_info=True)
-                    continue
-                match = choose_match(results, cand, haystack, duration, title)
-                if not match:
-                    continue
-                if is_compilation(match):
-                    fallback = fallback or match
-                    continue
-                if _with_image(match):
-                    return match
+            match = choose_match(results, cand, haystack, duration, title)
+            if not match:
+                continue
+            if is_compilation(match):
+                fallback = fallback or match
+                continue
+            if _with_image(match):
+                return match
     return _with_image(fallback)
 
 
@@ -539,9 +601,12 @@ _INFO_KEYS = ('title', 'duration', 'uploader', 'channel', 'tags', 'description',
 _queue = queue.PriorityQueue()
 _seq = itertools.count()
 _queued = set()
+_urgent = set()
 _active = set()
+_quick = set()
 _infos = {}
 _lock = threading.Lock()
+_apply_lock = threading.Lock()
 _worker = None
 
 
@@ -549,22 +614,36 @@ def lookup_enabled():
     return var.config.getboolean('bot', 'artwork_lookup', fallback=True) if var.config else True
 
 
+def _done(item):
+    """曲库已经查过(查到/没查到都算)。上一版没有 artwork_done 字段:
+    专辑/内嵌封面就算查过了,视频封面的再按新规则查一次。"""
+    return bool(getattr(item, 'artwork_done', False)) or getattr(item, 'artwork', '') in ('album', 'embedded')
+
+
 def ensure(item, info=None, urgent=False):
-    """需要时在后台给条目准备高清封面。可以随便多次调用:已有/排队中的直接返回。
-    urgent:有人正在看(播放页请求了高清图),插到队首。"""
+    """需要时给条目准备高清封面,可以随便多次调用。分两步:
+      1. 视频封面:拿到 yt-dlp 信息或有人正在看时,马上另起线程下载(不排队,几百毫秒就有图);
+      2. 专辑封面:排进后台队列慢慢查(曲库有限流),查到了再替换。
+    urgent:正在播放 / 有人在看,插到队首。"""
     if item is None or getattr(item, 'type', '') not in URL_TYPES + ('file',):
         return
-    state = getattr(item, 'artwork', '')
-    if state in DONE_STATES and has_hd(item.id):
-        return
-    if state == 'none':
+    hd = has_hd(item.id)
+    if _done(item) and (hd or getattr(item, 'artwork', '') == 'none'):
         return
     with _lock:
         if info:
             _infos[item.id] = {k: info.get(k) for k in _INFO_KEYS if info.get(k) is not None}
-        if item.id in _active or (item.id in _queued and not urgent):
+        if not hd and item.type in URL_TYPES and (info or urgent) and item.id not in _quick:
+            _quick.add(item.id)
+            threading.Thread(target=_quick_video, args=(item, _infos.get(item.id)),
+                             name='Thumb-' + item.id[:7], daemon=True).start()
+        if item.id in _active:
+            return
+        if item.id in _queued and (not urgent or item.id in _urgent):
             return
         _queued.add(item.id)
+        if urgent:
+            _urgent.add(item.id)
         _queue.put((0 if urgent else 1, next(_seq), item))
 
 
@@ -584,6 +663,7 @@ def _run():
             if item.id not in _queued:
                 continue  # 同一条目 urgent 时又排了一次,已经处理过
             _queued.discard(item.id)
+            _urgent.discard(item.id)
             _active.add(item.id)
             info = _infos.pop(item.id, None)
         try:
@@ -596,6 +676,17 @@ def _run():
                 _active.discard(item.id)
 
 
+def _quick_video(item, info):
+    try:
+        if not has_hd(item.id) and _video_step(item, info or {}):
+            _persist(item)
+    except Exception:
+        log.debug("artwork: video cover failed for %s", item.id, exc_info=True)
+    finally:
+        with _lock:
+            _quick.discard(item.id)
+
+
 def _persist(item):
     """后台改完直接存库:wrapper 只在校验/下载时同步版本,封面常常在那之后才好。
     条目已经不在缓存里(被删了)就不写,免得把删掉的记录又写回去。"""
@@ -605,20 +696,55 @@ def _persist(item):
 
 
 def _apply(item, im, state, match=None):
-    item.thumbnail = save(item.id, im)
-    item.artwork = state
-    if match:
-        item.artist = ', '.join(a for a in match.get('artists') or [] if a)
-        item.album = match.get('album') or ''
-    item.version += 1  # 通知 wrapper 存库
+    with _apply_lock:
+        if state == 'video' and getattr(item, 'artwork', '') in ('album', 'embedded') and has_hd(item.id):
+            return False  # 专辑封面已经先到了,别被视频封面盖掉
+        item.thumbnail = save(item.id, im)
+        item.artwork = state
+        if match:
+            item.artist = ', '.join(a for a in match.get('artists') or [] if a)
+            item.album = match.get('album') or ''
+        item.version += 1  # 通知 wrapper 存库
     log.info("artwork: %s cover for %s%s", state, item.format_title(),
              f" ({match['source']}: {', '.join(match['artists'])} - {match['title']})" if match else '')
+    return True
+
+
+def _video_step(item, info):
+    """下载视频封面;成功返回 True。"""
+    from PIL import Image
+    tmp_cover = os.path.join(var.tmp_folder or '', item.id + '.jpg')
+    if not info and os.path.isfile(tmp_cover):  # 上一版下载时存的原图
+        try:
+            with Image.open(tmp_cover) as im:
+                im.load()
+                return _apply(item, im, 'video')
+        except Exception:
+            pass
+    urls = _video_thumbnail_urls(info, item)
+    if not urls and getattr(item, 'url', ''):
+        try:
+            urls = _video_thumbnail_urls(_extract_info(item.url), item)
+        except Exception:
+            log.debug("artwork: could not read info for %s", item.url, exc_info=True)
+    for url in urls:
+        try:
+            return _apply(item, _fetch_image(url), 'video')
+        except Exception:
+            continue
+    return False
 
 
 def resolve(item, info=None, providers=None):
     if item.type == 'file':
         return _resolve_file(item, providers)
     info = info or {}
+    if lookup_enabled() and not info.get('uploader') and not info.get('tags') and getattr(item, 'url', ''):
+        # 从上次的队列恢复的条目没有 yt-dlp 信息:读一次,UP 主 / 标签 / 简介是确认歌手的主要依据
+        try:
+            info = dict(_extract_info(item.url), **info)
+        except Exception:
+            log.debug("artwork: could not read info for %s", item.url, exc_info=True)
     meta = {
         'title': info.get('title') or item.title,
         'duration': info.get('duration') or item.duration,
@@ -631,49 +757,35 @@ def resolve(item, info=None, providers=None):
     # "xxx - Topic" 是 YouTube 自动生成的歌手频道
     meta['uploader'] = re.sub(r'\s*-\s*topic$|vevo$', '', meta['uploader'], flags=re.I)
 
+    found = False
     if lookup_enabled() and meta['title']:
         match = find_album(meta, providers)
         if match:
             try:
-                return _apply(item, _fetch_image(match['image']), 'album', match)
+                found = _apply(item, _fetch_image(match['image']), 'album', match)
             except Exception:
                 log.debug("artwork: album image download failed", exc_info=True)
-
-    # 退回视频封面
-    tmp_cover = os.path.join(var.tmp_folder or '', item.id + '.jpg')
-    if not info and os.path.isfile(tmp_cover):
-        from PIL import Image
-        try:
-            with Image.open(tmp_cover) as im:
-                im.load()
-                return _apply(item, im, 'video')
-        except Exception:
-            pass
-    if not info.get('thumbnail') and not info.get('thumbnails') and getattr(item, 'url', ''):
-        try:
-            info = dict(_extract_info(item.url), **info)
-        except Exception:
-            log.debug("artwork: could not read info for %s", item.url, exc_info=True)
-    for url in _video_thumbnail_urls(info, item):
-        try:
-            return _apply(item, _fetch_image(url), 'video')
-        except Exception:
-            continue
-    item.artwork = 'none'
+    if not found and not (item.artwork == 'video' and has_hd(item.id)):
+        _video_step(item, info)  # 查不到专辑封面:用视频封面
+    if not has_hd(item.id):
+        item.artwork = 'none'
+    item.artwork_done = True
     item.version += 1
 
 
 def _resolve_file(item, providers=None):
     im = item.cover_image()
     if im is not None:
-        return _apply(item, im, 'embedded')
-    if lookup_enabled() and item.title and item.artist:
+        _apply(item, im, 'embedded')
+    elif lookup_enabled() and item.title and item.artist:
         meta = {'title': item.title, 'duration': item.duration, 'track': item.title, 'artist': item.artist}
         match = find_album(meta, providers)
         if match:
             try:
-                return _apply(item, _fetch_image(match['image']), 'album', dict(match, artists=[item.artist]))
+                _apply(item, _fetch_image(match['image']), 'album', dict(match, artists=[item.artist]))
             except Exception:
                 pass
-    item.artwork = 'none'
+    if not has_hd(item.id):
+        item.artwork = 'none'
+    item.artwork_done = True
     item.version += 1

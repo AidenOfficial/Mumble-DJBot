@@ -111,6 +111,62 @@ class ChooseMatchTest(unittest.TestCase):
         self.assertEqual('Whenever You Need Somebody', m['album'])
 
 
+class RegressionTest(unittest.TestCase):
+    """实机日志里出现过的误匹配 / 漏匹配。"""
+
+    def choose(self, results, title, duration):
+        cand = artwork.parse_title(title)[0]
+        return artwork.choose_match(results, cand, artwork.words(title), duration, title)
+
+    def test_dash_without_space_on_one_side(self):
+        self.assertEqual(Candidate('Loves me not', 't.A.T.u.'), artwork.parse_title('t.A.T.u.- Loves me not lyrics')[0])
+        self.assertEqual('A-ha', artwork.parse_title('A-ha')[0].track)
+
+    def test_parentheses_that_are_part_of_the_title(self):
+        m = self.choose([song('Right Now (Na Na Na)', ['Akon'], 241)], 'Akon - Right Now Na Na Na (Lyrics)', 242)
+        self.assertIsNotNone(m)
+
+    def test_taylors_version_preferred_over_original(self):
+        results = [song('I Knew You Were Trouble.', ['Taylor Swift'], 219, album='Red'),
+                   song("I Knew You Were Trouble (Taylor's Version)", ['Taylor Swift'], 219, album="Red (Taylor's Version)")]
+        m = self.choose(results, "Taylor Swift - I Knew You Were Trouble (Taylor's Version) (Lyric Video)", 221)
+        self.assertEqual("Red (Taylor's Version)", m['album'])
+
+    def test_karaoke_label_rejected(self):
+        results = [song('Baby (Feat. Ludacris) (In The Style Of Justin Bieber)', ['Karaoke - Ameritz'], 225)]
+        self.assertIsNone(self.choose(results, 'Justin Bieber - Baby ft. Ludacris', 225))
+
+    def test_named_artist_conflict_rejected_even_with_same_duration(self):
+        for title, result in [
+            ("Charlie Puth - We Don't Talk Anymore (feat. Selena Gomez) [Official Video]",
+             song("We Don't Talk Anymore", ['Pablo Cepeda'], 218)),
+            ('One Direction - Best Song Ever (Audio)', song('Best Song Ever', ['Party all night'], 200)),
+            ('Shingeki no Kyojin S1 OP1 | Linked Horizon - Guren no Yumiya',
+             song('Guren No Yumiya (From "Attack on Titan")', ['PelleK'], 300)),
+        ]:
+            self.assertIsNone(self.choose([result], title, result['duration']), title)
+
+    def test_localized_artist_still_matches_by_duration(self):
+        m = self.choose([song('晴天', ['Jay Chou'], 269.7)], '周杰伦 晴天 高音质', 270)
+        self.assertIsNotNone(m)
+
+    def test_rerecorded_versions_rejected(self):
+        for t in ('I Want It That Way (Reimagined)', 'Let Her Go (Recorded at Deezer, Sao Paulo)'):
+            self.assertTrue(artwork.is_variant({'title': t}, 'Some Video'), t)
+        self.assertFalse(artwork.is_variant({'title': 'Lean On', 'artists': ['Major Lazer', 'DJ Snake']},
+                                            'Major Lazer - Lean On'))
+
+    def test_party_compilation_detected(self):
+        self.assertTrue(artwork.is_compilation({'album': 'High School Party 2020'}))
+        self.assertFalse(artwork.is_compilation({'album': 'My World 2.0'}))
+
+    def test_query_language(self):
+        self.assertEqual('en', artwork._language("Bon Jovi It's My Life"))
+        self.assertEqual('ja', artwork._language('アイドル'))
+        self.assertEqual('zh', artwork._language('晴天'))
+        self.assertEqual('ko', artwork._language('불면증'))
+
+
 class FindAlbumTest(unittest.TestCase):
     def setUp(self):
         self._config = var.config
@@ -188,9 +244,17 @@ class ResolveTest(unittest.TestCase):
                 raise IOError('404')
             return Image.new('RGB', (1280, 720) if 'ytimg' in url or 'video' in url else (1000, 1000), 'red')
         artwork._fetch_image = fake_fetch
+        self.extracted = []
+        self._extract = artwork._extract_info
+
+        def fake_extract(url):
+            self.extracted.append(url)
+            return {}
+        artwork._extract_info = fake_extract
 
     def tearDown(self):
         artwork._fetch_image = self._fetch
+        artwork._extract_info = self._extract
         var.config, var.tmp_folder = self._saved
         self.tmp.cleanup()
 
@@ -232,15 +296,51 @@ class ResolveTest(unittest.TestCase):
     def test_nothing_available_marks_none(self):
         item = FakeURLItem()
         item.url = 'https://example.com/a'
-        artwork._extract_info, saved = (lambda url: {}), artwork._extract_info
-        try:
-            artwork.resolve(item, None, providers=[lambda q: []])
-        finally:
-            artwork._extract_info = saved
+        artwork.resolve(item, None, providers=[lambda q: []])
         self.assertEqual('none', item.artwork)
+        self.assertTrue(item.artwork_done)
         # 不再重复排队
         artwork.ensure(item)
         self.assertNotIn(item.id, artwork._queued)
+
+    def test_restored_item_reads_info_for_evidence(self):
+        # 从上次队列恢复的条目没有 yt-dlp 信息:读一次拿 UP 主 / 标签
+        item = FakeURLItem()
+        artwork.resolve(item, None, providers=[lambda q: []])
+        self.assertEqual([item.url], self.extracted)
+
+    def test_video_cover_never_overwrites_album_cover(self):
+        item = FakeURLItem()
+        provider = lambda q: [song('Lemon', ['米津玄師'], 256, album='Lemon', image='http://img/album.jpg')]  # noqa
+        artwork.resolve(item, {'title': item.title, 'uploader': 'x', 'duration': 260}, providers=[provider])
+        self.assertEqual('album', item.artwork)
+        # 抢先下载视频封面的线程晚到了
+        self.assertFalse(artwork._video_step(item, {'thumbnail': 'http://video.jpg'}))
+        self.assertEqual('album', item.artwork)
+
+    def test_video_first_then_album_upgrade(self):
+        item = FakeURLItem()
+        self.assertTrue(artwork._video_step(item, {'thumbnail': 'http://video.jpg'}))
+        self.assertEqual('video', item.artwork)
+        self.assertFalse(getattr(item, 'artwork_done', False))
+        provider = lambda q: [song('Lemon', ['米津玄師'], 256, album='Lemon', image='http://img/album.jpg')]  # noqa
+        artwork.resolve(item, {'title': item.title, 'uploader': 'x', 'duration': 260}, providers=[provider])
+        self.assertEqual('album', item.artwork)
+        self.assertTrue(item.artwork_done)
+
+    def test_ensure_skips_finished_items(self):
+        item = FakeURLItem()
+        item.artwork, item.artwork_done = 'none', True
+        artwork.ensure(item, urgent=True)
+        self.assertNotIn(item.id, artwork._queued)
+        # 上一版存的 'video'(没有 artwork_done)要按新规则再查一次
+        item.artwork, item.artwork_done = 'video', False
+        with open(artwork.path_for(item.id), 'wb') as f:
+            f.write(b'x')
+        artwork.ensure(item)
+        self.assertIn(item.id, artwork._queued)
+        with artwork._lock:
+            artwork._queued.discard(item.id)
 
     def test_prune_removes_oldest(self):
         var.config.set('bot', 'artwork_folder_max_size', '1')

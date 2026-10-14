@@ -77,6 +77,8 @@ def _status_payload():
         try:
             payload['current'] = _item_summary(
                 current, var.playlist.current_index)
+            # 正在播放的那首优先准备封面(已经有了就是一次文件检查)
+            artwork.ensure(current.item(), urgent=True)
             # SponsorBlock 要跳过的片段,前端在进度条上标出来
             skip_for = getattr(bot, 'skip_segments_for', None)
             payload['current']['skip_segments'] = skip_for(current.id) if skip_for else []

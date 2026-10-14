@@ -129,11 +129,12 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
           aria-hidden="true"
           class="absolute inset-0 h-full w-full scale-125 object-cover opacity-80 blur-2xl"
         />
+        <!-- 高清图还没准备好时服务器先给 100px 小图:模糊着显示,别拉伸出马赛克 -->
         <img
           :src="artSrc"
           alt=""
-          class="relative h-full w-full"
-          :class="artKind === 'video' ? 'object-contain' : 'object-cover'"
+          class="relative h-full w-full transition-[filter] duration-500"
+          :class="[artKind === 'video' ? 'object-contain' : 'object-cover', artKind ? '' : 'scale-110 blur-xl']"
         />
       </template>
       <div
