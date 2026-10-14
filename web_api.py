@@ -19,7 +19,7 @@ import variables as var
 import web_search
 from media import artwork
 from media.cache import get_cached_wrapper_from_scrap
-from web_users import current_user_name
+from web_users import current_user_name, requester_display_name
 
 
 def _current_wrapper():
@@ -43,6 +43,8 @@ def _item_summary(wrapper, index):
         # 封面来源(album / video / embedded / ''),变了说明高清图换了,前端据此刷新图片
         'artwork': getattr(item, 'artwork', '') or '',
         'album': getattr(item, 'album', '') or '',
+        # 点歌人:网页点的是 Web 显示名,聊天点的绑定了就换成 Web 显示名、否则是 Mumble 名
+        'requester': requester_display_name(getattr(wrapper, 'user', '') or ''),
     }
     if getattr(item, 'downloading', False):
         # 后台下载中(预下载/边下边播):队列里显示进度,播放条上画"已缓冲"部分

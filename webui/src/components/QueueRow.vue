@@ -50,6 +50,8 @@ const emit = defineEmits<{ act: [body: QueueAction] }>()
       </p>
       <p class="truncate text-xs" :style="{ color: 'var(--c-text-muted)' }">
         {{ typeLabel(props.item.type) }}<span v-if="props.item.duration"> · {{ formatTime(props.item.duration) }}</span>
+        <span v-if="props.item.requester && !props.nested" :title="t('queue.requestedBy', { name: props.item.requester })">
+          · <Icon icon="user" class="text-[10px]" /> {{ props.item.requester }}</span>
         <span v-if="props.item.download && !props.item.is_current" :style="{ color: 'var(--c-accent)' }">
           · <Icon icon="download" /> {{ props.item.download.stage === 'downloading' ? `${Math.round(props.item.download.progress * 100)}%` : t('queue.preparing') }}</span>
       </p>

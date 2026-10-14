@@ -326,6 +326,7 @@ class MumbleBot(PlayerMixin, ChannelMixin):
                 return
 
             self.log.info(f'bot: received command "{command}" with arguments "{argument}" from {user}')
+            self._refresh_mumble_link(text)
 
             # Anti stupid guy function
             if not self.is_admin(user) and not var.config.getboolean('bot', 'allow_private_message') and text.session:
@@ -406,6 +407,19 @@ class MumbleBot(PlayerMixin, ChannelMixin):
             self.mumble.send_channel(self.mumble.my_channel_id, msg)
         except Exception:
             self.log.warning("bot: could not send channel message", exc_info=True)
+
+    def _refresh_mumble_link(self, text):
+        """绑定表里记着 Mumble 名(Web 队列 / 统计靠它把聊天点歌对上 Web 昵称),
+        改名后在这里跟上;没绑定就是一次查不到。"""
+        if var.user_db is None:
+            return
+        try:
+            from commands.personal import mumble_key
+            key, name = mumble_key(self, text)
+            if key:
+                var.user_db.identity_for_mumble(key, name)
+        except Exception:
+            self.log.debug("bot: could not refresh mumble link", exc_info=True)
 
     @staticmethod
     def is_admin(user):

@@ -166,6 +166,12 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
           >{{ sourceLabel }}</span>
           <span v-if="current.artist && current.artist !== '??'">{{ current.artist }}</span>
           <span v-if="current.album" class="hidden max-w-48 truncate sm:inline" :title="current.album">· {{ current.album }}</span>
+          <span
+            v-if="current.requester"
+            class="max-w-40 truncate text-xs"
+            :style="{ color: 'var(--c-text-faint)' }"
+            :title="t('queue.requestedBy', { name: current.requester })"
+          ><Icon icon="user" class="mr-1" />{{ current.requester }}</span>
           <FavButton :item-id="current.id" :source="{ source: 'library', item_id: current.id }" :label="t('np.save')" />
           <AddToPlaylist :source="{ source: 'current' }" :label="t('atp.header')" />
         </p>

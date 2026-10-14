@@ -89,6 +89,7 @@ export const zhCN: Record<Key, Msg> = {
   'queue.save': '保存队列',
   'queue.clear': '全部清空',
   'queue.preparing': '准备中',
+  'queue.requestedBy': '点歌人：{name}',
 
   'search.placeholder': '搜索 YouTube 和 B 站…',
   'search.partial': '{sources} 搜索暂时不可用——只显示其余结果。',
@@ -299,7 +300,7 @@ export const zhCN: Record<Key, Msg> = {
   'me.confirmUnlink': '解除 Mumble 账号绑定？',
   'me.unlinked': '已解除绑定。',
   'me.guestTitle': '你正以访客身份浏览',
-  'me.guestHint': 'bot 没有收到 Cloudflare Access 身份，所以你点的歌会记在"Remote Control"名下，个人歌单也不可用。请通过受 Access 保护的地址打开 bot 来登录。',
+  'me.guestHint': 'bot 没有收到 Cloudflare Access 身份，所以你点的歌会记在"Guest"名下，个人歌单也不可用。请通过受 Access 保护的地址打开 bot 来登录。',
 
   'pl.mine': '我的歌单',
   'pl.shared': '大家的歌单',

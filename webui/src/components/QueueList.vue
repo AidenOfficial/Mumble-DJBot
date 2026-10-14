@@ -207,6 +207,8 @@ async function act(body: QueueAction) {
                   }) }}
                 </template>
                 <template v-else>{{ t('queue.groupSongs', { n: row.members.length, time: formatTime(row.duration) }) }}</template>
+                <span v-if="row.members[0]!.item.requester" :title="t('queue.requestedBy', { name: row.members[0]!.item.requester })">
+                  · <Icon icon="user" class="text-[10px]" /> {{ row.members[0]!.item.requester }}</span>
               </p>
             </div>
             <div class="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100" @click.stop>

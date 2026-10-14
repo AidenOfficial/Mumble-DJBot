@@ -69,7 +69,7 @@ class IdentityTest(Base):
     def test_anonymous_without_header(self):
         data = self.client.get('/api/me').get_json()
         self.assertIsNone(data['identity'])
-        self.assertEqual(data['display_name'], 'Remote Control')
+        self.assertEqual(data['display_name'], 'Guest')
         self.assertEqual(self.client.post('/api/me', json={'alias': 'x'}).status_code, 403)
 
     def test_set_and_clear_alias(self):

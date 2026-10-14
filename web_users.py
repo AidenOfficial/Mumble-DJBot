@@ -5,7 +5,7 @@
      配置了 access_team_domain + access_aud 时,改为校验 Cf-Access-Jwt-Assertion
      JWT 并从中取邮箱,校验失败直接 403(防止有人绕过 Tunnel 伪造请求头)。
   2. auth_method = password / token 时的 Web 用户名。
-  3. 都没有 → 匿名(可以点歌,但没有个人歌单)。
+  3. 都没有 → 匿名(可以点歌,署名 Guest,但没有个人歌单)。
 
 身份键:邮箱(小写)或 "user:<用户名>"。别名、歌单都挂在身份键上。
 数据存在 settings 数据库文件里(save_music_library=False 时 music_db 是
@@ -42,7 +42,7 @@ _ALIAS_RE = re.compile(r'^[^<>&"\'\x00-\x1f]+$')
 # =====================================================================
 
 class Identity:
-    def __init__(self, key=None, email=None, source='anonymous', fallback_name='Remote Control'):
+    def __init__(self, key=None, email=None, source='anonymous', fallback_name='Guest'):
         self.key = key
         self.email = email
         self.source = source
@@ -141,8 +141,35 @@ def current_identity():
 
 
 def current_user_name():
-    """点歌人名字:有别名用别名,否则邮箱前缀 / Web 用户名 / 'Remote Control'。"""
+    """点歌人名字:有别名用别名,否则邮箱前缀 / Web 用户名 / 'Guest'。"""
     return current_identity().display_name
+
+
+REQUESTER_NAMES_TTL = 5
+_requester_names_lock = threading.Lock()
+_requester_names = {'db': None, 'at': 0.0, 'names': {}}
+
+
+def requester_display_name(user):
+    """队列里显示的点歌人。网页点歌入队时记的已经是显示名,原样返回;
+    聊天点歌记的是 Mumble 名:绑定了 Web 身份就换成 Web 显示名,没绑定原样显示。
+    状态接口轮询得很勤,绑定表短暂缓存一下。"""
+    if not user:
+        return ''
+    db = var.user_db
+    if db is None:
+        return user
+    now = time.monotonic()
+    with _requester_names_lock:
+        cache = _requester_names
+        if cache['db'] is not db or now - cache['at'] > REQUESTER_NAMES_TTL:
+            try:
+                names = db.requester_display_names()
+            except Exception:
+                log.debug("web: could not load requester names", exc_info=True)
+                names = cache['names'] if cache['db'] is db else {}
+            cache.update(db=db, at=now, names=names)
+        return cache['names'].get(user, user)
 
 
 # =====================================================================

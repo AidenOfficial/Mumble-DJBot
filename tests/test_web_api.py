@@ -323,10 +323,12 @@ class WebApiTestCase(unittest.TestCase):
 
     def test_queue_listing(self):
         self.fill_queue(3)
+        var.playlist[1].user = 'Aiden'
         data = self.client.get('/api/queue').get_json()
         self.assertEqual(3, len(data['items']))
         self.assertEqual(['Song 0', 'Song 1', 'Song 2'],
                          [i['title'] for i in data['items']])
+        self.assertEqual(['', 'Aiden', ''], [i['requester'] for i in data['items']])
         self.assertTrue(data['items'][0]['is_current'])
         self.assertFalse(data['items'][1]['is_current'])
 
@@ -414,7 +416,7 @@ class WebApiTestCase(unittest.TestCase):
                 'source': 'youtube', 'url': 'https://www.youtube.com/watch?v=x'})
         self.assertEqual(200, rv.status_code)
         scrap.assert_called_once_with(
-            type='url', url='https://www.youtube.com/watch?v=x', user='Remote Control')  # 无 Access 身份时的默认署名
+            type='url', url='https://www.youtube.com/watch?v=x', user='Guest')  # 无 Access 身份时的默认署名
         self.assertEqual('new1', var.playlist[-1].id)
 
     def test_search_add_bilibili_normalizes(self):
