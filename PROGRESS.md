@@ -293,6 +293,33 @@ pyflakes、真实 ffmpeg、桩后端 + Playwright 截图/交互。
 - 用真实服务器和真实歌曲(YouTube / B 站 / 电台)各放一首,确认音质、切歌、暂停续播、闪避正常。
 - 用带客户端证书的配置(`[server] certificate`)连一次,确认注册用户身份照常。
 
+## 第九轮(2026-10-14):审计第八轮(PR #11)并补测
+
+- 审计范围:`bot/mumble_link.py` 对 pymumble-rev(commit 6651970)的调用语义逐一核对了库源码
+  (ThreadedClient / PcmBuffer / AudioSender / Connection),全仓库 grep 无旧 pymumble API 残留。
+- 修掉:
+  - 切歌残留竞态:播放线程几乎总是阻塞在 `write_audio` 里,`cut_audio()` 清空缓冲会把它唤醒,
+    `PcmBuffer.write` 随即把手里剩余的 ≤10 ms 旧歌写回刚清空的缓冲,留到下一首开头冒出来。
+    第八轮没碰到是因为淡出的 30 ms 比发送端 20 ms 一帧多出 10 ms 余量,机器一忙就会露。
+    现在 `write_audio` 用代数(`_cut_generation`)发现期间清过缓冲,就把残留再清掉。
+  - `MumbleLink.volume` 在事件循环刚关闭时会抛 `RuntimeError`(不只是 `ConnectionClosedError`),断线瞬间播放线程会崩;一并吞掉。
+  - 连接超时从库默认 10 s 提到 30 s(`CONNECT_TIMEOUT`,老代码等 60 s)。
+  - 自己 `close()` 时不再打 "audio stream ended" 警告。
+  - `!joinme <token>` 重复同一令牌不再重发 Authenticate。
+  - 第八轮误提交了运行时缓存 `artwork/*.jpg`;删掉并把 `artwork/` 加进 .gitignore。
+- 验证:全量 374 passed(tests/test_mumble_link.py 新增 4 条)。本容器连不到 mumble.aidenw.org(出网策略只放 HTTPS),
+  改用本地 mumble-server 1.5.517(含一个需令牌 `vipsecret` 的 VIP 频道)实测:点歌 0.27 s 出声、440 Hz 正确;
+  `!volume 20` 0.34 s 生效;8 次连续切歌旧歌均在 36 ms 内消失、新歌开头 10 ms 无旧歌能量;
+  `!pause` 34 ms 静音、`!play` 0.24 s 续播、位置偏差 +0.11 s;闪避 0.62 s 压到 1%、说完 ~2 s 恢复;
+  `!joinme` 进普通频道 / 无令牌进 VIP 被拒 / `!joinme vipsecret` 进 VIP / 令牌在本会话内持续有效;
+  杀掉服务器后 bot 5 s 内退出(日志记录原因);SIGTERM 正常退出存队列;全程无 WARNING。
+- 测试时的坑(不是 bot 的问题):Mumble 服务器默认文字消息限速 burst 5 条、之后 1 条/秒,
+  脚本连发命令会被服务器丢掉;测试服务器要把 `messageburst` / `messagelimit` 调大。
+- 顺带发现的既有问题(与本轮无关,未改):one-shot 模式下 `!stop` → `!clear` → 点歌 → `!play`,
+  `resume()` 在 `current_index == -1` 时调一次 `next()`,主循环接着又 `next()` 一次,把刚加的那首直接删掉,什么都不放。
+- 给 pymumble-rev 的建议(库侧,未改):`PcmBuffer.clear()` 应让正在阻塞的 `write()` 丢弃剩余部分;
+  `apply_gain` 逐样本 Python 循环,播放时 bot 进程约 7.5% CPU,可改用 array/numpy 向量化。
+
 ## DECISIONS 待决区
 
 ### ⚠️ push 被 403 拒绝(需要用户处理)

@@ -207,6 +207,64 @@ class CutTest(unittest.TestCase):
         self.assertEqual(link.volume, 0.6)
 
 
+class CutDuringBlockedWriteTest(unittest.TestCase):
+    def test_cut_drops_the_remainder_of_a_blocked_write(self):
+        # 播放线程阻塞在 write_audio 里时切歌:PcmBuffer.write 被 clear 唤醒后会把剩余的旧歌
+        # 补写进去,write_audio 要把这点残留再清掉,否则它会在下一首开头冒出来
+        link, client = make_link()
+        self.assertTrue(link.write_audio(b'\1' * 1920))  # 缓冲(20 ms)已满
+        results = []
+        t = threading.Thread(target=lambda: results.append(link.write_audio(b'\2' * 960)))
+        t.start()
+        time.sleep(0.05)
+        self.assertTrue(t.is_alive())  # 卡在写缓冲上
+        link.cut_audio(fade=0.01)
+        t.join(2)
+        self.assertEqual(results, [True])
+        self.assertEqual(client.buffer.buffered, 0.0)  # 残留没留下
+        self.assertTrue(link.write_audio(b'\3' * 960))  # 之后照常能写
+        self.assertEqual(client.buffer.buffered, 0.01)
+
+    def test_clear_audio_also_drops_the_remainder(self):
+        link, client = make_link()
+        link.write_audio(b'\1' * 1920)
+        t = threading.Thread(target=lambda: link.write_audio(b'\2' * 960))
+        t.start()
+        time.sleep(0.05)
+        link.clear_audio()
+        t.join(2)
+        self.assertEqual(client.buffer.buffered, 0.0)
+
+
+class VolumeAfterLoopClosedTest(unittest.TestCase):
+    def test_volume_update_on_a_closed_loop_is_swallowed(self):
+        # ThreadedClient 的 volume setter 在事件循环刚关掉时会抛 RuntimeError("Event loop is closed");
+        # 播放线程每帧都可能推音量,不能因此崩
+        link, client = make_link()
+
+        class Closed:
+            @property
+            def volume(self):
+                return 1.0
+
+            @volume.setter
+            def volume(self, value):
+                raise RuntimeError('Event loop is closed')
+
+        link._client = Closed()
+        link.volume = 0.5  # 不抛
+        self.assertEqual(link.volume, 0.5)
+
+    def test_local_close_does_not_warn_about_the_stream(self):
+        from concurrent.futures import Future
+        link, client = make_link()
+        link.close()
+        done = Future()
+        done.set_exception(RuntimeError('connection closed during playback'))
+        with self.assertNoLogs('bot', level='WARNING'):
+            link._on_stream_end(done)
+
+
 class DisconnectTest(unittest.TestCase):
     def test_disconnect_unblocks_the_player_and_marks_dead(self):
         link, client = make_link()
