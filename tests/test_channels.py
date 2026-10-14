@@ -1,4 +1,4 @@
-"""频道树 / 默认频道 / 自动跟随。用假的 pymumble 对象(频道是 dict,用户有 name/channel_id/session)。"""
+"""频道树 / 默认频道 / 自动跟随。用假的 MumbleLink(频道是 dict,用户有 name/channel_id/session)。"""
 import configparser
 import os
 import sys
@@ -15,38 +15,31 @@ from bot.channels import ChannelMixin  # noqa: E402
 from database import SettingsDatabase  # noqa: E402
 
 
-class FakeChannel(dict):
-    def __init__(self, mumble, cid, name, parent=None, position=0):
-        super().__init__(channel_id=cid, name=name, position=position)
-        if parent is not None:
-            self['parent'] = parent
-        self.mumble = mumble
-
-    def move_in(self):
-        self.mumble.moves.append(self['channel_id'])
-        self.mumble.users.myself.channel_id = self['channel_id']
-
-
 class FakeUser:
     def __init__(self, session, name, channel_id):
         self.session, self.name, self.channel_id = session, name, channel_id
         self.self_mute = self.self_deaf = self.mute = self.deaf = False
 
 
-class FakeUsers:
+class FakeUsers(dict):
+    """session -> User 的映射,和 MumbleLink.users 一样;多一个 add() 方便造数据。"""
+
     def __init__(self):
-        self.all = {}
+        super().__init__()
         self.myself = None
 
-    def by_session(self):
-        return dict(self.all)
+    @property
+    def all(self):
+        return self
 
     def add(self, session, name, channel_id):
-        self.all[session] = FakeUser(session, name, channel_id)
-        return self.all[session]
+        self[session] = FakeUser(session, name, channel_id)
+        return self[session]
 
 
 class FakeMumble:
+    """bot.mumble_link.MumbleLink 里频道逻辑用到的那部分接口。"""
+
     def __init__(self):
         self.moves = []
         self.users = FakeUsers()
@@ -58,8 +51,23 @@ class FakeMumble:
         for cid, name, parent, pos in [(0, 'Root', None, 0), (1, 'Lobby', 0, 0), (2, 'Games', 0, 1),
                                        (3, 'Music', 0, 2), (4, 'AFK', 1, 0), (5, 'Squad', 2, 0),
                                        (6, 'Lobby', 2, 1)]:
-            self.channels[cid] = FakeChannel(self, cid, name, parent, pos)
+            ch = {'channel_id': cid, 'name': name, 'position': pos}
+            if parent is not None:
+                ch['parent'] = parent
+            self.channels[cid] = ch
         self.users.myself = self.users.add(1, 'DJBot', 3)
+
+    @property
+    def myself(self):
+        return self.users.myself
+
+    @property
+    def my_channel_id(self):
+        return self.users.myself.channel_id if self.users.myself else None
+
+    def move(self, channel_id):
+        self.moves.append(channel_id)
+        self.users.myself.channel_id = channel_id
 
 
 class Bot(ChannelMixin):

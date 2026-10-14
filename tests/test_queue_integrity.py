@@ -107,11 +107,16 @@ def ids(pl):
     return [w.id for w in pl]
 
 
-class FakeSendAudio:
-    def get_buffer_size(self):
-        return 0.0
+class FakeLink:
+    """MumbleLink 里播放循环用到的部分。"""
+    alive = True
+    audio_buffered = 0.0
+    volume = 1.0
 
-    def add_sound(self, pcm):
+    def write_audio(self, pcm):
+        return True
+
+    def cut_audio(self):
         pass
 
 
@@ -137,8 +142,7 @@ class Player(PlayerMixin):
     def __init__(self):
         self.log = logging.getLogger('test')
         self.stereo = True
-        self.mumble = mock.Mock()
-        self.mumble.send_audio = FakeSendAudio()
+        self.mumble = FakeLink()
         self.exit = False
         self.thread = None
         self.read_pcm_size = 0

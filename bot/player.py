@@ -652,7 +652,7 @@ class PlayerMixin:
 
     # Main loop of the Bot
     def loop(self):
-        while not self.exit and self.mumble.is_alive():
+        while not self.exit and self.mumble.alive:
             self.last_loop_at = time.time()
             self._write_heartbeat()
             self._autosave_playlist()
@@ -681,7 +681,7 @@ class PlayerMixin:
                 # playlist.next() exactly once, skipping the offending item.
                 time.sleep(0.1)
 
-        while self.mumble.send_audio.get_buffer_size() > 0 and self.mumble.is_alive():
+        while self.mumble.audio_buffered > 0 and self.mumble.alive:
             # Empty the buffer before exit
             time.sleep(0.01)
         time.sleep(0.5)
@@ -724,12 +724,14 @@ class PlayerMixin:
         except Exception:
             pass
 
-    def _loop_iteration(self):
-        while self.thread and self.mumble.send_audio.get_buffer_size() > 0.5 and not self.exit:
-            # If the buffer isn't empty, I cannot send new music part, so I wait
-            self._loop_status = f'Wait for buffer {self.mumble.send_audio.get_buffer_size():.3f}'
-            time.sleep(0.01)
+    def _send_pcm(self, pcm):
+        # 发送端只缓冲 0.5 秒:写满时这里阻塞,由播放速度节流(以前是轮询缓冲大小再 sleep)。
+        # 音量在发送端按帧施加,不再在这里乘,所以调音量 / 闪避当帧生效,不用等缓冲里的 0.5 秒播完。
+        self._loop_status = 'Sending'
+        if not self.mumble.write_audio(pcm):
+            self.log.debug("bot: audio stream closed, dropping pcm")
 
+    def _loop_iteration(self):
         raw_music = None
         if self.thread:
             # I get raw from ffmpeg thread
@@ -759,14 +761,14 @@ class PlayerMixin:
                     # attack doesn't begin on a hard discontinuity (click/pop).
                     # Must be tested before the normal full-chunk branch below,
                     # which would otherwise swallow it.
-                    self.mumble.send_audio.add_sound(
-                        audioop.mul(self._fadeout(raw_music, self.stereo, fadein=True), 2, self.volume_helper.real_volume))
+                    self._send_pcm(self._fadeout(raw_music, self.stereo, fadein=True))
                 elif not self.on_interrupting and len(raw_music) == self.pcm_buffer_size:
-                    self.mumble.send_audio.add_sound(
-                        audioop.mul(raw_music, 2, self.volume_helper.real_volume))
+                    self._send_pcm(raw_music)
                 elif self.on_interrupting or len(raw_music) < self.pcm_buffer_size:
-                    self.mumble.send_audio.add_sound(
-                        audioop.mul(self._fadeout(raw_music, self.stereo, fadein=False), 2, self.volume_helper.real_volume))
+                    if not self.on_interrupting:
+                        # 自然播完:最后一块淡出。被打断时 interrupt() 已经在发送端淡出并清空了缓冲,
+                        # 这里再写一块旧歌进去反而会在静音后冒出 10 ms 的尾音
+                        self._send_pcm(self._fadeout(raw_music, self.stereo, fadein=False))
                     self.thread.kill()
                     self.thread = None
                     time.sleep(0.1)
@@ -894,8 +896,15 @@ class PlayerMixin:
 
             self.last_volume_cycle_time = time.time()
 
-    def ducking_sound_received(self, user, sound):
-        rms = audioop.rms(sound.pcm, 2)
+        # 把算好的音量交给发送端(变化很小时不发,省得每 10 ms 跨线程一次)
+        real = self.volume_helper.real_volume
+        if abs(real - getattr(self, '_sent_volume', -1.0)) > 0.001:
+            self.mumble.volume = real
+            self._sent_volume = real
+
+    def ducking_sound_received(self, user, pcm):
+        """连接层回调:pcm 是解码后的 16 位单声道 PCM。"""
+        rms = audioop.rms(pcm, 2)
         self._max_rms = max(rms, self._max_rms)
         if self._display_rms:
             if rms < self.ducking_threshold:
@@ -1014,6 +1023,9 @@ class PlayerMixin:
         # Kill the ffmpeg thread
         if self.thread:
             self.on_interrupting = True
+            # 以前要等发送缓冲里约 0.5 秒的旧歌播完,切歌/暂停才生效。现在发送端先淡出再清空,
+            # 立即安静下来;playhead 按墙钟计,本来就约等于"已经听到的位置",暂停后续播也更准
+            self.mumble.cut_audio()
 
             time.sleep(0.1)
             self.song_start_at = -1

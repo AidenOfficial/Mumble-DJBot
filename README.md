@@ -217,7 +217,7 @@ The default channel, follow mode and idle auto-pause are set on the web interfac
 
 ### Running the tests
 
-The test suite needs neither a Mumble server nor `pymumble`.
+The test suite does not need a Mumble server; it does need libopus, like the bot itself.
 
 ```bash
 python3.12 -m venv venv
@@ -225,7 +225,7 @@ venv/bin/pip install -r requirements.txt pytest
 venv/bin/python -m pytest tests
 ```
 
-Python 3.12 is required: pymumble 2.x needs Python 3.12 or later, and Python 3.13 removed the `audioop` module. If you use 3.13, install `audioop-lts` as well.
+Python 3.12 is required: pymumble-rev needs Python 3.12 or later, and Python 3.13 removed the `audioop` module. If you use 3.13, install `audioop-lts` as well.
 
 ### Building the web interface
 
@@ -260,7 +260,7 @@ npm run build   # writes the production build to webui/dist
 
 ## Acknowledgements
 
-This project is based on [botamusique](https://github.com/azlux/botamusique) by Azlux and its contributors, including @TerryGeng and @mertkutay. It also builds on [pymumble](https://codeberg.org/pymumble/pymumble), [yt-dlp], [spotDL], [SponsorBlock], [BilibiliSponsorBlock] and [OpenCC](https://github.com/BYVoid/OpenCC).
+This project is based on [botamusique](https://github.com/azlux/botamusique) by Azlux and its contributors, including @TerryGeng and @mertkutay. It also builds on [pymumble-rev](https://github.com/AidenOfficial/PyMumble) (our Mumble client library, a rewrite inspired by [pymumble](https://codeberg.org/pymumble/pymumble)), [yt-dlp], [spotDL], [SponsorBlock], [BilibiliSponsorBlock] and [OpenCC](https://github.com/BYVoid/OpenCC).
 
 ## License
 

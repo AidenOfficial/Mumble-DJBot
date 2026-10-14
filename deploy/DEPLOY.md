@@ -210,9 +210,8 @@ sudo systemctl list-timers botamusique-ytdlp-update.timer
 - 若服务器对用户名有注册要求,换一个未被占用的 `[bot] username`。
 
 **报错 `module 'ssl' has no attribute 'wrap_socket'`**
-- 项目现已使用社区维护的 pymumble 2.x(Codeberg 版,`requirements.txt` 里锁定了 commit),
-  它要求 **Python ≥ 3.12**,并已解除旧版对 protobuf 3.20 的锁定。
-  如果部署机的 python3 低于 3.12,请先安装 python3.12 再建 venv。
+- 项目现已使用自己维护的 Mumble 客户端库 pymumble-rev(`requirements.txt` 里锁定了 commit),
+  它要求 **Python ≥ 3.12**。如果部署机的 python3 低于 3.12,请先安装 python3.12 再建 venv。
 
 **机器人在频道里但没声音**
 - 编辑配置,在 `[debug]` 段加 `ffmpeg = True` 和 `youtube_dl = True`,重启后看 `journalctl` 里的 ffmpeg / 下载日志。

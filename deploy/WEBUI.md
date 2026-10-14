@@ -180,7 +180,7 @@ access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
 遇到 bug 时不用再翻 `docker compose logs`:
 
 - 实时滚动显示 bot 日志,可按级别(全部 / 信息 / 警告 / 错误)筛选、搜索;
-  带异常的行点开看完整调用栈。第三方库(pymumble、Flask 路由异常)的警告和错误也会收进来。
+  带异常的行点开看完整调用栈。第三方库(pymumble-rev、Flask 路由异常)的警告和错误也会收进来。
 - **跨重启保留**:日志同时写进 settings 库旁边的 `logs/bot-log.jsonl`(Docker 里是
   `data/logs/`,2MB 滚动、保留 3 份)。bot 崩溃 / 被 watchdog 杀掉重启后,面板里
   "bot 已重启"分隔线上方就是崩溃前的日志。

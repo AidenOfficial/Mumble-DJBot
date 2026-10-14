@@ -24,7 +24,7 @@ FROM python:3.12-slim-bookworm
 ENV DEBIAN_FRONTEND noninteractive
 EXPOSE 8181
 RUN apt update && \
-    apt install --no-install-recommends -y opus-tools ffmpeg libmagic-dev curl tar unzip ca-certificates && \
+    apt install --no-install-recommends -y libopus0 opus-tools ffmpeg libmagic-dev curl tar unzip ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Deno:spotdl 下载 YouTube 音频时用它破解 JS 校验,缺它 Spotify 播放会失败。

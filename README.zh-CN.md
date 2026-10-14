@@ -216,7 +216,7 @@ NAS 部署、cookies 配置与日常运维说明见 [`deploy/DOCKER.md`](deploy/
 
 ### 运行测试
 
-测试不需要 Mumble 服务器，也不需要安装 `pymumble`。
+测试不需要 Mumble 服务器，但和 bot 本身一样需要系统装有 libopus。
 
 ```bash
 python3.12 -m venv venv
@@ -224,7 +224,7 @@ venv/bin/pip install -r requirements.txt pytest
 venv/bin/python -m pytest tests
 ```
 
-需使用 Python 3.12：pymumble 2.x 要求 Python 3.12 及以上，而 Python 3.13 移除了 `audioop` 模块。如需使用 3.13，请额外安装 `audioop-lts`。
+需使用 Python 3.12：pymumble-rev 要求 Python 3.12 及以上，而 Python 3.13 移除了 `audioop` 模块。如需使用 3.13，请额外安装 `audioop-lts`。
 
 ### 构建 Web 界面
 
@@ -259,7 +259,7 @@ npm run build   # 生产构建输出至 webui/dist
 
 ## 致谢
 
-本项目基于 Azlux 及 @TerryGeng、@mertkutay 等贡献者开发的 [botamusique](https://github.com/azlux/botamusique)，并使用了 [pymumble](https://codeberg.org/pymumble/pymumble)、[yt-dlp]、[spotDL]、[SponsorBlock]、[BilibiliSponsorBlock] 与 [OpenCC](https://github.com/BYVoid/OpenCC)。
+本项目基于 Azlux 及 @TerryGeng、@mertkutay 等贡献者开发的 [botamusique](https://github.com/azlux/botamusique)，并使用了 [pymumble-rev](https://github.com/AidenOfficial/PyMumble)（我们自己维护的 Mumble 客户端库，受 [pymumble](https://codeberg.org/pymumble/pymumble) 启发重写）、[yt-dlp]、[spotDL]、[SponsorBlock]、[BilibiliSponsorBlock] 与 [OpenCC](https://github.com/BYVoid/OpenCC)。
 
 ## 许可证
 

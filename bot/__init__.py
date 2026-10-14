@@ -4,8 +4,9 @@ import os
 import sys
 
 # On Windows dev machines libopus is usually not installed system-wide, but
-# the PyOgg wheel ships an opus.dll - make it discoverable before importing
-# the mumble library (which loads opuslib, which needs the DLL, at import).
+# the PyOgg wheel ships an opus.dll - make it discoverable on PATH so the
+# Mumble library (pymumble-rev, which loads libopus via ctypes) can find it.
+# Alternatively set PYMUMBLE_REV_LIBOPUS to the DLL's full path.
 if sys.platform == "win32":
     import ctypes.util
     import sysconfig

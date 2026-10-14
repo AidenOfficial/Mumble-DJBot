@@ -11,9 +11,9 @@
   idle_pause_minutes  bot 所在频道连续没人这么多分钟就自动暂停(0 = 关,默认 5)
   idle_resume         自动暂停后有人回来就自动继续播放(1/0,默认 1)
 
-pymumble 的回调在它自己的线程里、持着 users.lock 调用,所以这里只记录事件,
-真正的决策放到防抖定时器线程里做(人在频道间来回切时不会被带着乱跑)。
-本模块不 import pymumble,单测用假的 mumble 对象即可。
+连接层的用户事件回调里只记录事件,真正的决策放到防抖定时器线程里做
+(人在频道间来回切时不会被带着乱跑)。self.mumble 是 bot.mumble_link.MumbleLink;
+本模块不 import 通信库,单测用假的 mumble 对象即可。
 """
 
 import json
@@ -87,13 +87,10 @@ class ChannelMixin:
         return dict(self.mumble.channels)
 
     def _users(self):
-        return list(self.mumble.users.by_session().values())
+        return list(self.mumble.users.values())
 
     def my_channel_id(self):
-        try:
-            return self.mumble.users.myself.channel_id
-        except AttributeError:
-            return None
+        return self.mumble.my_channel_id
 
     def channel_path(self, channel_id, channels=None):
         """根频道 -> [];其余返回从根往下的名字列表。"""
@@ -126,7 +123,7 @@ class ChannelMixin:
 
     def _is_ignored(self, user):
         """bot 自己和 when_nobody_in_channel_ignore 里列出的其他 bot 不算人。"""
-        myself = getattr(self.mumble.users, 'myself', None)
+        myself = self.mumble.myself
         if myself is not None and user.session == myself.session:
             return True
         return user.name in getattr(self, 'bots', set())
@@ -143,7 +140,7 @@ class ChannelMixin:
         """给 Web 用的嵌套频道树快照。"""
         channels = self._channels()
         users = self._users()
-        myself = getattr(self.mumble.users, 'myself', None)
+        myself = self.mumble.myself
         by_channel = {}
         for u in users:
             by_channel.setdefault(u.channel_id, []).append({
@@ -180,12 +177,11 @@ class ChannelMixin:
     def move_to_channel(self, channel_id, reason=''):
         if channel_id is None or channel_id == self.my_channel_id():
             return False
-        channel = self.mumble.channels.get(channel_id)
-        if channel is None:
+        if channel_id not in self.mumble.channels:
             return False
         log.info("channel: moving to %s%s", '/'.join(self.channel_path(channel_id)) or '(root)',
                  f" ({reason})" if reason else '')
-        channel.move_in()
+        self.mumble.move(channel_id)
         return True
 
     def join_channel(self):
@@ -208,7 +204,7 @@ class ChannelMixin:
         self._last_leaver = None  # (time, 去向 channel_id 或 None=下线)
 
     def _note_user_event(self, user, kind):
-        """在 pymumble 回调里调用:只记账,不做决策。"""
+        """在连接层的用户事件回调里调用:只记账,不做决策。"""
         if not hasattr(self, '_follow_lock'):
             self._init_follow()
         mine = self.my_channel_id()

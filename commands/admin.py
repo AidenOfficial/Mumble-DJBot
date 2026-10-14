@@ -8,8 +8,10 @@ from media.item import item_id_generators
 
 
 def cmd_joinme(bot, user, text, command, parameter):
-    bot.mumble.users.myself.move_in(
-        bot.mumble.users[text.actor].channel_id, token=parameter)
+    if parameter:
+        # 带了访问令牌:先把它加到本次会话的令牌里,再进对方所在的(可能受限的)频道
+        bot.mumble.set_tokens(bot.mumble.tokens + [parameter])
+    bot.mumble.move(bot.mumble.users[text.actor].channel_id)
 
 
 def cmd_user_ban(bot, user, text, command, parameter):
@@ -123,13 +125,11 @@ def cmd_kill(bot, user, text, command, parameter):
 
 def cmd_update(bot, user, text, command, parameter):
     if bot.is_admin(user):
-        bot.mumble.users[text.actor].send_text_message(
-            tr('start_updating'))
+        bot.send_msg(tr('start_updating'), text)
         msg = util.update(bot.version)
-        bot.mumble.users[text.actor].send_text_message(msg)
+        bot.send_msg(msg, text)
     else:
-        bot.mumble.users[text.actor].send_text_message(
-            tr('not_admin'))
+        bot.send_msg(tr('not_admin'), text)
 
 
 

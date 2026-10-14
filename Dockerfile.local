@@ -41,7 +41,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 EXPOSE 8181
 WORKDIR /botamusique
 RUN apt-get update \
-    && apt-get install -y ffmpeg libmagic-dev opus-tools zlib1g \
+    && apt-get install -y ffmpeg libmagic-dev libopus0 opus-tools zlib1g \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=python-builder /botamusique .
 COPY --from=node-builder /botamusique/static static
