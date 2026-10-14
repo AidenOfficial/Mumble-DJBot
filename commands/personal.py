@@ -30,6 +30,9 @@ def mumble_key(bot, text):
     except Exception:
         return None, ''
     name = getattr(user, 'name', '') or ''
+    if name and var.config.getboolean('commands', 'split_username_at_space', fallback=False):
+        # 和命令分发里的 user 保持一致:点歌记录 / 队列按这个名字对上绑定关系
+        name = name.split()[0]
     if getattr(user, 'user_id', None):
         return f"uid:{user.user_id}", name
     if getattr(user, 'cert_hash', None):

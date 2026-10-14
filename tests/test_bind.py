@@ -106,6 +106,26 @@ class BindTest(Base):
         self.db.set_alias('aiden@x.com', 'DJ A')
         self.assertEqual(self.db.requester_display_names(), {'Aiden': 'DJ A'})
 
+    def test_requester_display_name_for_queue(self):
+        code, _ = self.db.create_bind_code('aiden@x.com')
+        self.bind(1, code)
+        self.db.set_alias('aiden@x.com', 'DJ A')
+        web_users._requester_names['db'] = None  # 跳过缓存
+        # 聊天点歌:绑定了显示 Web 昵称,没绑定显示 Mumble 名;网页点歌本来就是显示名
+        self.assertEqual(web_users.requester_display_name('Aiden'), 'DJ A')
+        self.assertEqual(web_users.requester_display_name('Mallory'), 'Mallory')
+        self.assertEqual(web_users.requester_display_name('Guest'), 'Guest')
+        self.assertEqual(web_users.requester_display_name(''), '')
+
+    def test_mumble_rename_followed_on_next_command(self):
+        from bot.core import MumbleBot
+        code, _ = self.db.create_bind_code('aiden@x.com')
+        self.bind(1, code)
+        self.users[1].name = 'Aiden2'
+        MumbleBot._refresh_mumble_link(self.bot, Text(1))
+        self.assertEqual(self.db.mumble_link_for('aiden@x.com')['mumble_name'], 'Aiden2')
+        self.assertEqual(self.db.requester_display_names(), {'Aiden2': 'Aiden'})
+
 
 class PlaylistCommandTest(Base):
     def setUp(self):

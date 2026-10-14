@@ -89,6 +89,7 @@ export const ja: Record<Key, Msg> = {
   'queue.save': 'キューを保存',
   'queue.clear': 'すべてクリア',
   'queue.preparing': '準備中',
+  'queue.requestedBy': 'リクエスト：{name}',
 
   'search.placeholder': 'YouTube と bilibili を検索…',
   'search.partial': '{sources} の検索は現在利用できません。その他の結果を表示しています。',
@@ -299,7 +300,7 @@ export const ja: Record<Key, Msg> = {
   'me.confirmUnlink': 'Mumble アカウントとの連携を解除しますか？',
   'me.unlinked': '連携を解除しました。',
   'me.guestTitle': 'ゲストとして閲覧中です',
-  'me.guestHint': 'Cloudflare Access の ID が bot に届いていないため、追加した曲は「Remote Control」名義になり、マイプレイリストも使えません。Access で保護されたアドレスから開いてサインインしてください。',
+  'me.guestHint': 'Cloudflare Access の ID が bot に届いていないため、追加した曲は「Guest」名義になり、マイプレイリストも使えません。Access で保護されたアドレスから開いてサインインしてください。',
 
   'pl.mine': 'マイプレイリスト',
   'pl.shared': 'みんなのプレイリスト',

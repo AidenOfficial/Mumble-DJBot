@@ -100,6 +100,7 @@ export const en = {
   'queue.save': 'Save queue',
   'queue.clear': 'Clear all',
   'queue.preparing': 'preparing',
+  'queue.requestedBy': 'Requested by {name}',
 
   // ---- 搜索 ----
   'search.placeholder': 'Search YouTube and Bilibili...',
@@ -319,7 +320,7 @@ export const en = {
   'me.confirmUnlink': 'Unlink your Mumble account?',
   'me.unlinked': 'Unlinked.',
   'me.guestTitle': "You're browsing as a guest",
-  'me.guestHint': 'No Cloudflare Access identity reached the bot, so songs you add are credited to "Remote Control" and personal playlists are off. Open the bot through its Access-protected address to sign in.',
+  'me.guestHint': 'No Cloudflare Access identity reached the bot, so songs you add are credited to "Guest" and personal playlists are off. Open the bot through its Access-protected address to sign in.',
 
   // ---- 公开歌单 ----
   'pl.mine': 'My playlists',
