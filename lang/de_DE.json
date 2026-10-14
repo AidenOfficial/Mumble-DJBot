@@ -89,7 +89,7 @@
         "wrong_pattern": "",
         "yt_no_more": "",
         "yt_query_error": "",
-        "yt_result": "Ergebnis der YouTube-Suche:\n{result_table}\nSende <i>!sl {{indexes}}</i>, um das gewünscht Element abzuspielen.\n<i>!ytquery -n</i>, um die nächste Seite aufzurufen."
+        "yt_result": "Ergebnis der YouTube-Suche:\n{result_table}\nSende <i>!sl {{indexes}}</i>, um das gewünscht Element abzuspielen.\n<i>!ysearch -n</i>, um die nächste Seite aufzurufen."
     },
     "web": {
         "token": "",

@@ -89,7 +89,7 @@
         "wrong_pattern": "Espressione regolare non valida: {error}.",
         "yt_no_more": "Nessun altro risultato!",
         "yt_query_error": "Impossibile consultare YouTube!",
-        "yt_result": "Risultato ricerca YouTube: {result_table} Usa <i>!sl {{indexes}}</i> per riprodurre l'elemento desiderato. <br />\\n<i>!ytquery -n</i> per la pagina successiva."
+        "yt_result": "Risultato ricerca YouTube: {result_table} Usa <i>!sl {{indexes}}</i> per riprodurre l'elemento desiderato. <br />\\n<i>!ysearch -n</i> per la pagina successiva."
     },
     "web": {
         "token": "Token",

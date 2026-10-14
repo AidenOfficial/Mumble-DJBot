@@ -15,7 +15,6 @@ import ipaddress
 import socket
 import subprocess as sp
 import logging
-import traceback
 import requests
 
 log = logging.getLogger("bot")
@@ -229,46 +228,6 @@ def get_bilibili_url_from_input(string):
         url += ("&" if "?" in url else "?") + "p=" + page
 
     return url
-
-
-def youtube_search(query):
-    global log
-    import json
-
-    try:
-        cookie_file =  var.config.get('youtube_dl', 'cookie_file')
-        cookie = parse_cookie_file(cookie_file) if cookie_file else {}
-        r = requests.get("https://www.youtube.com/results", cookies=cookie,
-                         params={'search_query': query}, timeout=5)
-        result_json_match = re.findall(r">var ytInitialData = (.*?);</script>", r.text)
-
-        if not len(result_json_match):
-            log.error("util: can not interpret youtube search web page")
-            return False
-
-        result_big_json = json.loads(result_json_match[0])
-        results = []
-        try:
-            for item in result_big_json['contents']['twoColumnSearchResultsRenderer']\
-                    ['primaryContents']['sectionListRenderer']['contents'][0]\
-                    ['itemSectionRenderer']['contents']:
-                if 'videoRenderer' not in item:
-                    continue
-                video_info = item['videoRenderer']
-                title = video_info['title']['runs'][0]['text']
-                video_id = video_info['videoId']
-                uploader = video_info['ownerText']['runs'][0]['text']
-                results.append([video_id, title, uploader])
-        except (json.JSONDecodeError, KeyError):
-            log.error("util: can not interpret youtube search web page")
-            return False
-
-        return results
-
-    except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError, requests.exceptions.Timeout):
-        error_traceback = traceback.format_exc().split("During")[0]
-        log.error("util: youtube query failed with error:\n %s" % error_traceback)
-        return False
 
 
 def get_media_duration(path):

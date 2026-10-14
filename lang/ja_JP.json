@@ -89,7 +89,7 @@
         "wrong_pattern": "不正な正規表現パターン：{error}。",
         "yt_no_more": "これ以上のエントリがありません。",
         "yt_query_error": "Youtubeを訪問できません！",
-        "yt_result": "Youtube検索結果： {result_table}  <i>!sl {{indexes}}</i>を使って再生します。 <br />\n<i>!ytquery -n</i>を使ってページをめぐります。"
+        "yt_result": "Youtube検索結果： {result_table}  <i>!sl {{indexes}}</i>を使って再生します。 <br />\n<i>!ysearch -n</i>を使ってページをめぐります。"
     },
     "web": {
         "token": "トークン",

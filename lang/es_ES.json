@@ -89,7 +89,7 @@
         "wrong_pattern": "Expresión regular inválida: {error}",
         "yt_no_more": "No hay más resultados!",
         "yt_query_error": "Fue imposible consultar a youtube!",
-        "yt_result": "Resultado de la consulta a youtube: {result_table} Use <i>!sl {{índices}}</i> para reproducir el elemento que usted desea. <br />\n<i>!ytquery -n</i> para la siguiente página."
+        "yt_result": "Resultado de la consulta a youtube: {result_table} Use <i>!sl {{índices}}</i> para reproducir el elemento que usted desea. <br />\n<i>!ysearch -n</i> para la siguiente página."
     },
     "web": {
         "token": "Token",

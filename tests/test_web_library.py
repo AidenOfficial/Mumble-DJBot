@@ -67,7 +67,8 @@ def file_row(name, tags=(), keywords=None, title=None):
 class WebLibraryTestCase(unittest.TestCase):
     def setUp(self):
         from flask import Flask
-        import media.file  # noqa: F401  注册 file 类型
+        import importlib
+        importlib.import_module("media.file")  # 注册 file 类型
         import web_library
         import constants
         constants.load_lang('en_US')

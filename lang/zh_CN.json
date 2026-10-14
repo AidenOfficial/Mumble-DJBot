@@ -125,7 +125,7 @@
         "wrong_pattern": "错误的正则表达式：{error}.",
         "yt_no_more": "没有更多条目了！",
         "yt_query_error": "无法访问Youtube！",
-        "yt_result": "Youtube查询结果： {result_table} 使用 <i>!sl {{indexes}}</i> 播放列表中的曲目。 <br />\n使用<i>!ytquery -n</i>翻页。"
+        "yt_result": "Youtube查询结果： {result_table} 使用 <i>!sl {{indexes}}</i> 播放列表中的曲目。 <br />\n使用<i>!ysearch -n</i>翻页。"
     },
     "web": {
         "token": "令牌",

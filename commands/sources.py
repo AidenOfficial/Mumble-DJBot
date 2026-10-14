@@ -1,10 +1,12 @@
 # coding=utf-8
+import html
 import logging
 import re
 
 from constants import tr_cli as tr
 import util
 import variables as var
+import web_search
 from pyradios import RadioBrowser
 from database import Condition
 from media.item import dict_to_item
@@ -284,69 +286,70 @@ def cmd_rb_play(bot, user, text, command, parameter):
             bot.send_msg(msg, text)
 
 
-yt_last_result = []
-yt_last_page = 0  # TODO: if we keep adding global variables, we need to consider sealing all commands up into classes.
+YT_SEARCH_LIMIT = 20
+YT_ITEMS_PER_PAGE = 5
+# 每个用户自己的 !ysearch 结果和当前页:user -> (results, page)
+_yt_search_state = {}
+
+
+def _yt_search(query, limit=YT_SEARCH_LIMIT):
+    """与 Web 搜索同一套 yt-dlp ytsearch;失败返回 None。"""
+    try:
+        return web_search.search_youtube(query, limit)
+    except Exception as e:
+        log.error(f"cmd: youtube search failed: {e}")
+        return None
+
+
+def _yt_show_page(bot, text, results, page):
+    start = page * YT_ITEMS_PER_PAGE
+    shown = results[start:start + YT_ITEMS_PER_PAGE]
+    _shared.song_shortlist = [{'type': 'url', 'url': r['url'], 'title': r['title']} for r in shown]
+    bot.send_msg(tr('yt_result', result_table=_yt_format_result(shown)), text)
 
 
 def cmd_yt_search(bot, user, text, command, parameter):
-    global log, yt_last_result, yt_last_page
-    item_per_page = 5
-
-    if parameter:
-        # if next page
-        if parameter.startswith("-n"):
-            yt_last_page += 1
-            if len(yt_last_result) > yt_last_page * item_per_page:
-                _shared.song_shortlist = [{'type': 'url',
-                                   'url': "https://www.youtube.com/watch?v=" + result[0],
-                                   'title': result[1]
-                                   } for result in yt_last_result[yt_last_page * item_per_page: (yt_last_page * item_per_page) + item_per_page]]
-                msg = _yt_format_result(yt_last_result, yt_last_page * item_per_page, item_per_page)
-                bot.send_msg(tr('yt_result', result_table=msg), text)
-            else:
-                bot.send_msg(tr('yt_no_more'), text)
-
-        # if query
-        else:
-            results = util.youtube_search(parameter)
-            if results:
-                yt_last_result = results
-                yt_last_page = 0
-                _shared.song_shortlist = [{'type': 'url', 'url': "https://www.youtube.com/watch?v=" + result[0]}
-                                  for result in results[0: item_per_page]]
-                msg = _yt_format_result(results, 0, item_per_page)
-                bot.send_msg(tr('yt_result', result_table=msg), text)
-            else:
-                bot.send_msg(tr('yt_query_error'), text)
-    else:
+    if not parameter:
         bot.send_msg(tr('bad_parameter', command=command), text)
+        return
+
+    if parameter.startswith("-n"):
+        results, page = _yt_search_state.get(user, ([], 0))
+        page += 1
+        if len(results) > page * YT_ITEMS_PER_PAGE:
+            _yt_search_state[user] = (results, page)
+            _yt_show_page(bot, text, results, page)
+        else:
+            bot.send_msg(tr('yt_no_more'), text)
+        return
+
+    results = _yt_search(parameter)
+    if results:
+        _yt_search_state[user] = (results, 0)
+        _yt_show_page(bot, text, results, 0)
+    else:
+        bot.send_msg(tr('yt_query_error'), text)
 
 
-def _yt_format_result(results, start, count):
+def _yt_format_result(results):
     msg = '<table><tr><th width="10%">Index</th><th>Title</th><th width="20%">Uploader</th></tr>'
-    for index, item in enumerate(results[start:start + count]):
+    for index, item in enumerate(results):
         msg += '<tr><td>{index:d}</td><td>{title}</td><td>{uploader}</td></tr>'.format(
-            index=index + 1, title=item[1], uploader=item[2])
+            index=index + 1, title=html.escape(item['title']), uploader=html.escape(item['uploader']))
     msg += '</table>'
 
     return msg
 
 
 def cmd_yt_play(bot, user, text, command, parameter):
-    global log, yt_last_result, yt_last_page
-
-    if parameter:
-        results = util.youtube_search(parameter)
-        if results:
-            yt_last_result = results
-            yt_last_page = 0
-            url = "https://www.youtube.com/watch?v=" + yt_last_result[0][0]
-            cmd_play_url(bot, user, text, command, url)
-        else:
-            bot.send_msg(tr('yt_query_error'), text)
-    else:
+    if not parameter:
         bot.send_msg(tr('bad_parameter', command=command), text)
-
+        return
+    results = _yt_search(parameter, limit=1)
+    if results:
+        cmd_play_url(bot, user, text, command, results[0]['url'])
+    else:
+        bot.send_msg(tr('yt_query_error'), text)
 
 
 def cmd_list_file(bot, user, text, command, parameter):

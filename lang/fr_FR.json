@@ -89,7 +89,7 @@
         "wrong_pattern": "regex invalide: {error}.",
         "yt_no_more": "Plus de résultats !",
         "yt_query_error": "Impossible d'interroger youtube !",
-        "yt_result": "Résultat de la requête Youtube : {result_table} Utilisez <i>!sl {{indexes}}</i> pour jouer l'entrée que vous voulez. <br />\n<i>!ytquery -n</i> pour la page suivante."
+        "yt_result": "Résultat de la requête Youtube : {result_table} Utilisez <i>!sl {{indexes}}</i> pour jouer l'entrée que vous voulez. <br />\n<i>!ysearch -n</i> pour la page suivante."
     },
     "web": {
         "token": "Token",

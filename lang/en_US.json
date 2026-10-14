@@ -125,7 +125,7 @@
         "wrong_pattern": "Invalid regex: {error}.",
         "yt_no_more": "No more results!",
         "yt_query_error": "Unable to query youtube!",
-        "yt_result": "Youtube query result: {result_table} Use <i>!sl {{indexes}}</i> to play the item you want. <br />\n<i>!ytquery -n</i> for the next page."
+        "yt_result": "Youtube query result: {result_table} Use <i>!sl {{indexes}}</i> to play the item you want. <br />\n<i>!ysearch -n</i> for the next page."
     },
     "web": {
         "token": "Token",
