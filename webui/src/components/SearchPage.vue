@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { postQueue as _pq, thumbnailUrl as _tn } from '../api'
 import { formatTime, useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
+import FavButton from './FavButton.vue'
 import { t } from '../i18n'
 
 interface SearchResult {
@@ -13,6 +14,8 @@ interface SearchResult {
   uploader: string
   duration: number
   thumbnail: string
+  /** 入队后的条目 id(画收藏 ♥ 用) */
+  item_id?: string
 }
 
 const { applyStatus } = useStatus()
@@ -88,9 +91,7 @@ const SOURCE_STYLE: Record<string, { label: string; bg: string; fg: string }> = 
   <section class="mx-auto w-full max-w-3xl px-4 py-8">
     <!-- search box -->
     <div class="relative">
-      <svg viewBox="0 0 24 24" class="pointer-events-none absolute top-1/2 left-4 h-5 w-5 -translate-y-1/2" fill="none" stroke="currentColor" stroke-width="2" :style="{ color: 'var(--c-text-faint)' }">
-        <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
-      </svg>
+      <Icon icon="magnifying-glass" class="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2" :style="{ color: 'var(--c-text-faint)' }" />
       <input
         v-model="query"
         type="search"
@@ -133,6 +134,10 @@ const SOURCE_STYLE: Record<string, { label: string; bg: string; fg: string }> = 
             <span v-if="r.duration" class="shrink-0 tabular-nums">{{ formatTime(r.duration) }}</span>
           </p>
         </div>
+        <FavButton
+          :item-id="r.item_id ?? ''"
+          :source="{ source: 'url', url: r.url, title: r.title, duration: r.duration, provider: r.source, id: r.id }"
+        />
         <AddToPlaylist
           :source="{ source: 'url', url: r.url, title: r.title, duration: r.duration, provider: r.source, id: r.id }"
         />
@@ -146,10 +151,10 @@ const SOURCE_STYLE: Record<string, { label: string; bg: string; fg: string }> = 
           :disabled="added[`${r.source}:${r.id}`] === 'pending' || added[`${r.source}:${r.id}`] === 'done'"
           @click="add(r)"
         >
-          <span v-if="added[`${r.source}:${r.id}`] === 'done'">{{ t('common.queued') }}</span>
+          <span v-if="added[`${r.source}:${r.id}`] === 'done'"><Icon icon="check" class="mr-1" />{{ t('common.queued') }}</span>
           <span v-else-if="added[`${r.source}:${r.id}`] === 'pending'">...</span>
           <span v-else-if="added[`${r.source}:${r.id}`] === 'error'">{{ t('common.failed') }}</span>
-          <span v-else>{{ t('common.queue') }}</span>
+          <span v-else><Icon icon="plus" class="mr-1" />{{ t('common.queue') }}</span>
         </button>
       </li>
     </ul>

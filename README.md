@@ -65,7 +65,8 @@ The dashboard is served at `/`. The original interface remains available at `/le
 ### Personal playlists
 
 - Users are identified by the email address that Cloudflare Access passes through, and can set a display alias.
-- Each user has their own playlists, which can be played immediately, shuffled or appended to the queue.
+- Each user has their own playlists, which can be played immediately, shuffled or appended to the queue. A whole playlist shows up in the queue as one collapsible entry instead of hundreds of rows.
+- The heart button next to any song adds it to "My Favorites" (the same playlist the `!fav` chat command uses).
 - Playlists can be imported from YouTube, NetEase Cloud Music, QQ Music and Spotify. Tracks from the last three are matched to YouTube sources, and matching handles both Simplified and Traditional Chinese titles.
 - A Mumble account can be linked to the web identity with a one-time code (`!bind`). Linked users can manage their playlists from chat with `!mylist` and `!fav`.
 

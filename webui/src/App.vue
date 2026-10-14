@@ -58,9 +58,7 @@ onMounted(() => {
             class="flex h-8 w-8 items-center justify-center rounded-full"
             :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
           >
-            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="currentColor" aria-hidden="true">
-              <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
-            </svg>
+            <Icon icon="music" class="text-sm" aria-hidden="true" />
           </span>
           <span class="text-base font-semibold tracking-tight">DJ Bot</span>
         </div>
@@ -91,14 +89,13 @@ onMounted(() => {
             <option v-for="l in LOCALES" :key="l.code" :value="l.code">{{ l.label }}</option>
           </select>
           <button
-            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-0 text-lg"
-            :style="{ background: 'var(--c-surface-2)' }"
+            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-0 text-sm"
+            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
+            :aria-label="t('theme.title', { mode: t(THEME_KEY[theme]) })"
             :title="t('theme.title', { mode: t(THEME_KEY[theme]) })"
             @click="cycleTheme"
           >
-            <span v-if="theme === 'light'">☀️</span>
-            <span v-else-if="theme === 'dark'">🌙</span>
-            <span v-else>🌗</span>
+            <Icon :icon="theme === 'light' ? 'sun' : theme === 'dark' ? 'moon' : 'circle-half-stroke'" />
           </button>
         </div>
       </div>

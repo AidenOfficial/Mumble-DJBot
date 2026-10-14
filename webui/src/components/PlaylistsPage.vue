@@ -6,12 +6,15 @@ import {
   fetchImportJob, type ImportJob, type PlaylistDetail, type PlaylistSummary,
 } from '../api'
 import AddToPlaylist from './AddToPlaylist.vue'
+import FavButton from './FavButton.vue'
 import { useMe } from '../composables/useMe'
+import { useFavorites } from '../composables/useFavorites'
 import { formatTime, useStatus } from '../composables/useStatus'
-import { t, typeLabel } from '../i18n'
+import { t, tParts, typeLabel } from '../i18n'
 import type { Key } from '../i18n/en'
 
 const { me, playlists, reloadPlaylists } = useMe()
+const { reloadFavorites } = useFavorites()
 const { applyStatus } = useStatus()
 
 const selectedId = ref<number | null>(null)
@@ -34,6 +37,13 @@ function say(msg: string) {
 watch(() => me.value?.can_have_playlists, (ok) => { if (ok) reloadPlaylists() }, { immediate: true })
 const signedIn = computed(() => !!me.value?.can_have_playlists)
 
+// "我喜欢的音乐"(♥ / !fav 收藏的那张)排最前;还没收藏过任何歌时也占个位,告诉用户怎么用
+const sortedPlaylists = computed(() =>
+  [...playlists.value].sort((a, b) => Number(!!b.favorites) - Number(!!a.favorites)))
+const hasFavorites = computed(() => playlists.value.some((p) => p.favorites))
+const favHint = ref(false)
+const plName = (pl: { name: string; favorites?: boolean }) => (pl.favorites ? t('fav.name') : pl.name)
+
 // 别人公开的歌单(访客也能看、能播放)
 const shared = ref<PlaylistSummary[]>([])
 async function loadShared() {
@@ -49,8 +59,8 @@ onMounted(() => {
 onBeforeUnmount(() => clearInterval(sharedTimer))
 
 // 默认选中:自己的第一个,没有就选大家的第一个
-watch([playlists, shared], ([mine, others]) => {
-  if (selectedId.value === null) {
+watch([sortedPlaylists, shared], ([mine, others]) => {
+  if (selectedId.value === null && !favHint.value) {
     const first = mine[0] ?? others[0]
     if (first) select(first.id)
     return
@@ -64,6 +74,7 @@ watch([playlists, shared], ([mine, others]) => {
 
 async function select(id: number) {
   selectedId.value = id
+  favHint.value = false
   renaming.value = false
   try {
     detail.value = await fetchPlaylist(id)
@@ -132,10 +143,12 @@ async function rename() {
 async function remove() {
   if (!detail.value) return
   if (!confirm(t('pl.confirmDelete', { name: detail.value.name }))) return
+  const wasFavorites = detail.value.favorites
   await deletePlaylist(detail.value.id)
   selectedId.value = null
   detail.value = null
   reloadPlaylists()
+  if (wasFavorites) reloadFavorites()
 }
 
 async function play(mode: 'append' | 'next' | 'replace', opts: { shuffle?: boolean; item?: number } = {}) {
@@ -212,6 +225,7 @@ async function saveQueue() {
     detail.value = rv.playlist
     say(rv.added ? t('pl.savedQueue', { n: rv.added }) : t('pl.queueEmpty'))
     reloadPlaylists()
+    if (rv.playlist.favorites) reloadFavorites()
   } catch {
     say(t('pl.saveQueueFailed'))
   }
@@ -221,6 +235,7 @@ async function dropItem(rowId: number) {
   if (!detail.value) return
   detail.value = await removeFromPlaylist(detail.value.id, rowId)
   reloadPlaylists()
+  if (detail.value.favorites) reloadFavorites()
 }
 
 async function onDrop(i: number) {
@@ -273,13 +288,14 @@ const totalDuration = computed(() =>
             class="cursor-pointer rounded-full border-0 px-3.5 text-sm font-semibold"
             :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }"
             :title="t('pl.create')"
-          >＋</button>
+            :aria-label="t('pl.create')"
+          ><Icon icon="plus" /></button>
         </form>
         <button
           class="mt-2 w-full cursor-pointer rounded-full border-0 px-4 py-2 text-xs font-medium"
           :style="{ background: importOpen ? 'var(--c-accent-soft)' : 'var(--c-surface-2)', color: importOpen ? 'var(--c-accent)' : 'var(--c-text)' }"
           @click="importOpen = !importOpen"
-        >{{ t('pl.importToggle') }}</button>
+        ><Icon icon="file-import" class="mr-1.5" />{{ t('pl.importToggle') }}</button>
         <div v-if="importOpen" class="mt-2 rounded-xl p-3 text-xs"
              :style="{ background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }">
           <form class="flex flex-col gap-2" @submit.prevent="runImport">
@@ -328,7 +344,22 @@ const totalDuration = computed(() =>
           {{ t('pl.mine') }}
         </h2>
         <ul class="flex flex-col gap-1">
-          <li v-for="pl in playlists" :key="pl.id">
+          <li v-if="!hasFavorites">
+            <button
+              class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border-0 px-3 py-2.5 text-left"
+              :style="favHint
+                ? { background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }
+                : { background: 'transparent', color: 'var(--c-text)' }"
+              @click="favHint = true; selectedId = null; detail = null"
+            >
+              <span class="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <Icon icon="heart" class="shrink-0" :style="{ color: 'var(--c-danger)' }" />
+                <span class="truncate">{{ t('fav.name') }}</span>
+              </span>
+              <span class="shrink-0 text-xs tabular-nums" :style="{ color: 'var(--c-text-faint)' }">0</span>
+            </button>
+          </li>
+          <li v-for="pl in sortedPlaylists" :key="pl.id">
             <button
               class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border-0 px-3 py-2.5 text-left"
               :style="pl.id === selectedId
@@ -336,15 +367,18 @@ const totalDuration = computed(() =>
                 : { background: 'transparent', color: 'var(--c-text)' }"
               @click="select(pl.id)"
             >
-              <span class="truncate text-sm font-medium">{{ pl.name }}</span>
+              <span class="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <Icon v-if="pl.favorites" icon="heart" class="shrink-0" :style="{ color: 'var(--c-danger)' }" />
+                <span class="truncate">{{ plName(pl) }}</span>
+              </span>
               <span class="flex shrink-0 items-center gap-1.5 text-xs tabular-nums" :style="{ color: 'var(--c-text-faint)' }">
-                <span v-if="pl.public" :title="t('pl.publicBadge')" aria-hidden="true">🌐</span>{{ pl.count }}
+                <Icon v-if="pl.public" icon="globe" :title="t('pl.publicBadge')" />{{ pl.count }}
               </span>
             </button>
           </li>
         </ul>
         <p v-if="!playlists.length" class="mt-1 px-3 text-sm" :style="{ color: 'var(--c-text-faint)' }">
-          {{ t('pl.noneYet') }}
+          <template v-for="(p, k) in tParts('pl.noneYet', { heart: 'heart' })" :key="k"><Icon v-if="p.param" icon="heart" :style="{ color: 'var(--c-danger)' }" /><template v-else>{{ p.text }}</template></template>
         </p>
         </template>
 
@@ -376,8 +410,19 @@ const totalDuration = computed(() =>
         </p>
       </aside>
 
+      <!-- 还没有"我喜欢的音乐":说明怎么用 -->
+      <div v-if="favHint && !detail" class="min-w-0">
+        <h1 class="flex items-center gap-2 text-2xl font-semibold">
+          <Icon icon="heart" :style="{ color: 'var(--c-danger)' }" />{{ t('fav.name') }}
+        </h1>
+        <div class="mt-4 rounded-2xl p-6 text-center text-sm"
+             :style="{ background: 'var(--c-surface)', color: 'var(--c-text-muted)' }">
+          <template v-for="(p, k) in tParts('fav.hint', { heart: 'heart' })" :key="k"><Icon v-if="p.param" icon="heart" :style="{ color: 'var(--c-danger)' }" /><template v-else>{{ p.text }}</template></template>
+        </div>
+      </div>
+
       <!-- 歌单详情 -->
-      <div v-if="detail" class="min-w-0">
+      <div v-else-if="detail" class="min-w-0">
         <div class="flex flex-wrap items-end justify-between gap-3">
           <div class="min-w-0">
             <form v-if="renaming" class="flex gap-2" @submit.prevent="rename">
@@ -391,12 +436,15 @@ const totalDuration = computed(() =>
                       :style="{ background: 'var(--c-accent)', color: 'var(--c-on-accent)' }">{{ t('common.save') }}</button>
             </form>
             <h1 v-else class="flex items-center gap-2 truncate text-2xl font-semibold">
-              {{ detail.name }}
+              <Icon v-if="detail.favorites" icon="heart" :style="{ color: 'var(--c-danger)' }" />
+              {{ plName(detail) }}
               <template v-if="detail.mine">
+                <!-- 改了名就不再是收藏歌单了,所以收藏歌单不给改名 -->
+                <button v-if="!detail.favorites" class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
+                        :title="t('pl.rename')" :aria-label="t('pl.rename')"
+                        @click="renaming = true; renameDraft = detail.name"><Icon icon="pen" /></button>
                 <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
-                        :title="t('pl.rename')" @click="renaming = true; renameDraft = detail.name">✎</button>
-                <button class="cursor-pointer border-0 bg-transparent p-0 text-sm" :style="{ color: 'var(--c-text-faint)' }"
-                        :title="t('pl.delete')" @click="remove">🗑</button>
+                        :title="t('pl.delete')" :aria-label="t('pl.delete')" @click="remove"><Icon icon="trash-can" /></button>
               </template>
             </h1>
             <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" :style="{ color: 'var(--c-text-muted)' }">
@@ -414,7 +462,7 @@ const totalDuration = computed(() =>
                 :title="t(detail.public ? 'pl.makePrivateHint' : 'pl.makePublicHint')"
                 :aria-pressed="detail.public"
                 @click="togglePublic"
-              >{{ t(detail.public ? 'pl.public' : 'pl.private') }}</button>
+              ><Icon :icon="detail.public ? 'globe' : 'lock'" class="mr-1" />{{ t(detail.public ? 'pl.public' : 'pl.private') }}</button>
             </p>
           </div>
           <div class="flex flex-wrap gap-2">
@@ -424,26 +472,26 @@ const totalDuration = computed(() =>
               :disabled="!detail.items.length || busy"
               :title="t('pl.playNowHint')"
               @click="play('replace')"
-            >{{ t('pl.playNow') }}</button>
+            ><Icon icon="play" class="mr-1.5" />{{ t('pl.playNow') }}</button>
             <button
               class="cursor-pointer rounded-full border-0 px-3.5 py-2 text-sm"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
               :disabled="!detail.items.length || busy"
               @click="play('replace', { shuffle: true })"
-            >{{ t('pl.shuffle') }}</button>
+            ><Icon icon="shuffle" class="mr-1.5" />{{ t('pl.shuffle') }}</button>
             <button
               class="cursor-pointer rounded-full border-0 px-3.5 py-2 text-sm"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
               :disabled="!detail.items.length || busy"
               @click="play('append')"
-            >{{ t('pl.queueAll') }}</button>
+            ><Icon icon="plus" class="mr-1.5" />{{ t('pl.queueAll') }}</button>
             <button
               v-if="!detail.mine && signedIn"
               class="cursor-pointer rounded-full border-0 px-3.5 py-2 text-sm"
               :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
               :title="t('pl.copyHint')"
               @click="copyToMine"
-            >{{ t('pl.copy') }}</button>
+            ><Icon icon="copy" class="mr-1.5" />{{ t('pl.copy') }}</button>
           </div>
         </div>
 
@@ -477,13 +525,17 @@ const totalDuration = computed(() =>
             <div class="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
               <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                      :title="t('common.playNext')" @click="play('next', { item: e.id })">⤴</button>
+                      :title="t('common.playNext')" :aria-label="t('common.playNext')"
+                      @click="play('next', { item: e.id })"><Icon icon="arrow-turn-up" /></button>
               <button class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-                      :title="t('common.addToQueue')" @click="play('append', { item: e.id })">＋</button>
+                      :title="t('common.addToQueue')" :aria-label="t('common.addToQueue')"
+                      @click="play('append', { item: e.id })"><Icon icon="plus" /></button>
+              <FavButton v-if="signedIn && !detail.favorites" :item-id="e.item_id"
+                         :source="{ source: 'playlist_entry', playlist_id: detail.id, entry: e.id }" />
               <button v-if="detail.mine" class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
                       :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
-                      :title="t('pl.removeItem')" @click="dropItem(e.id)">✕</button>
+                      :title="t('pl.removeItem')" :aria-label="t('pl.removeItem')" @click="dropItem(e.id)"><Icon icon="xmark" /></button>
               <AddToPlaylist v-else :source="{ source: 'playlist_entry', playlist_id: detail.id, entry: e.id }" />
             </div>
           </li>
@@ -491,7 +543,7 @@ const totalDuration = computed(() =>
         <div v-else-if="detail.mine" class="mt-6 rounded-2xl p-6 text-center text-sm"
              :style="{ background: 'var(--c-surface)', color: 'var(--c-text-muted)' }">
           <p>{{ t('pl.empty') }}</p>
-          <p class="mt-1">{{ t('pl.emptyHint') }}</p>
+          <p class="mt-1"><template v-for="(p, k) in tParts(detail.favorites ? 'fav.hint' : 'pl.emptyHint', { heart: 'heart' })" :key="k"><Icon v-if="p.param" icon="heart" :style="{ color: 'var(--c-danger)' }" /><template v-else>{{ p.text }}</template></template></p>
           <button class="mt-3 cursor-pointer rounded-full border-0 px-4 py-2 text-xs font-semibold"
                   :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
                   @click="saveQueue">{{ t('pl.saveQueueHere') }}</button>

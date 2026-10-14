@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { fetchQueue, postQueue, thumbnailUrl, type QueueAction, type QueueItem } from '../api'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { fetchQueue, postQueue, type QueueAction, type QueueGroup, type QueueItem } from '../api'
 import { formatTime, useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
-import { t, typeLabel } from '../i18n'
+import QueueRow from './QueueRow.vue'
+import { t } from '../i18n'
 
 const { status, applyStatus } = useStatus()
 
@@ -11,6 +12,64 @@ const items = ref<QueueItem[]>([])
 const busy = ref(false)
 const dragFrom = ref<number | null>(null)
 const dragOver = ref<number | null>(null)
+
+// ---- 整张歌单一起入队的,折叠成一组 ------------------------------------------
+
+interface Member { item: QueueItem; index: number }
+type Row =
+  | { kind: 'item'; key: string; member: Member }
+  | { kind: 'group'; key: string; group: QueueGroup; members: Member[]; currentPos: number; duration: number }
+
+/** 连续、同一组的条目合成一行;只剩一首的组就当普通单曲显示 */
+const rows = computed<Row[]>(() => {
+  const out: Row[] = []
+  const list = items.value
+  let i = 0
+  while (i < list.length) {
+    const item = list[i]!
+    const key = item.group?.key
+    let j = i + 1
+    if (key) while (j < list.length && list[j]!.group?.key === key) j++
+    if (key && j - i > 1) {
+      const members = list.slice(i, j).map((it, k) => ({ item: it, index: i + k }))
+      out.push({
+        kind: 'group',
+        key: `g-${key}-${i}`,
+        group: item.group!,
+        members,
+        currentPos: members.findIndex((m) => m.item.is_current),
+        duration: members.reduce((sum, m) => sum + (m.item.duration || 0), 0),
+      })
+    } else {
+      for (let k = i; k < j; k++) out.push({ kind: 'item', key: `${list[k]!.id}-${k}`, member: { item: list[k]!, index: k } })
+    }
+    i = j
+  }
+  return out
+})
+
+// 展开状态按组 key 记(队列推进、下标变化时不会自己收起)
+const expanded = ref<Set<string>>(new Set())
+const showAll = ref<Set<string>>(new Set())
+const PAGE = 100
+
+function toggled(set: Set<string>, key: string) {
+  const next = new Set(set)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  return next
+}
+const toggleExpanded = (key: string) => (expanded.value = toggled(expanded.value, key))
+const toggleShowAll = (key: string) => (showAll.value = toggled(showAll.value, key))
+
+/** 展开后默认只渲染 100 首(从正在播的附近开始),上千首的歌单不会卡页面 */
+function visibleMembers(row: Extract<Row, { kind: 'group' }>): Member[] {
+  if (showAll.value.has(row.group.key) || row.members.length <= PAGE) return row.members
+  const start = row.currentPos > PAGE / 2 ? row.currentPos - 10 : 0
+  return row.members.slice(start, start + PAGE)
+}
+
+const nextIndex = computed(() => (status.value?.current_index ?? -1) + 1)
 
 function onDragStart(i: number, e: DragEvent) {
   dragFrom.value = i
@@ -91,71 +150,110 @@ async function act(body: QueueAction) {
     </div>
 
     <ul class="flex flex-col gap-1.5">
-      <li
-        v-for="(item, i) in items"
-        :key="`${item.id}-${i}`"
-        class="group flex cursor-grab items-center gap-3 rounded-xl px-3 py-2 active:cursor-grabbing"
-        :style="{
-          ...(item.is_current
-            ? { background: 'var(--c-accent-soft)' }
-            : { background: 'var(--c-surface)', boxShadow: 'var(--shadow-1)' }),
-          ...(dragOver === i && dragFrom !== null && dragFrom !== i
-            ? { outline: '2px solid var(--c-accent)', outlineOffset: '-2px' }
-            : {}),
-          ...(dragFrom === i ? { opacity: 0.4 } : {}),
-        }"
-        draggable="true"
-        @dragstart="onDragStart(i, $event)"
-        @dragover="onDragOver(i, $event)"
-        @drop.prevent="onDrop(i)"
-        @dragend="onDragEnd"
-      >
-        <span class="shrink-0 select-none text-xs" :style="{ color: 'var(--c-text-faint)' }" aria-hidden="true">⠿</span>
-        <!-- art -->
-        <div class="h-10 w-10 shrink-0 overflow-hidden rounded-lg" :style="{ background: 'var(--c-surface-2)' }">
-          <img v-if="item.has_thumbnail" :src="thumbnailUrl(item.id)" alt="" class="h-full w-full object-cover" loading="lazy" />
-          <div v-else class="flex h-full w-full items-center justify-center opacity-40">
-            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" /></svg>
+      <template v-for="row in rows" :key="row.key">
+        <QueueRow
+          v-if="row.kind === 'item'"
+          :item="row.member.item"
+          :index="row.member.index"
+          :is-next="row.member.index === nextIndex"
+          :drag-over="dragOver === row.member.index && dragFrom !== null && dragFrom !== row.member.index"
+          :dragging="dragFrom === row.member.index"
+          @act="act"
+          @dragstart="onDragStart(row.member.index, $event)"
+          @dragover="onDragOver(row.member.index, $event)"
+          @drop.prevent="onDrop(row.member.index)"
+          @dragend="onDragEnd"
+        />
+
+        <!-- 一整张歌单:默认折叠成一行 -->
+        <li
+          v-else
+          class="overflow-hidden rounded-xl"
+          :style="{
+            background: row.currentPos >= 0 ? 'var(--c-accent-soft)' : 'var(--c-surface)',
+            boxShadow: 'var(--shadow-1)',
+          }"
+        >
+          <div
+            class="group flex cursor-pointer items-center gap-3 px-3 py-2.5"
+            role="button"
+            :aria-expanded="expanded.has(row.group.key)"
+            @click="toggleExpanded(row.group.key)"
+          >
+            <Icon
+              :icon="expanded.has(row.group.key) ? 'chevron-down' : 'chevron-right'"
+              class="w-3 shrink-0 text-xs"
+              :style="{ color: 'var(--c-text-faint)' }"
+            />
+            <div
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+              :style="{ background: 'var(--c-surface-2)', color: 'var(--c-accent)' }"
+            >
+              <Icon :icon="row.group.kind === 'url_playlist' ? 'globe' : 'list-ul'" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <span class="truncate" :title="row.group.name">{{ row.group.name || t('common.untitled') }}</span>
+                <span
+                  class="shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium"
+                  :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text-muted)' }"
+                >{{ t(row.group.kind === 'url_playlist' ? 'queue.groupKindOnline' : 'queue.groupKindPlaylist') }}</span>
+              </p>
+              <p class="truncate text-xs" :style="{ color: 'var(--c-text-muted)' }">
+                <template v-if="row.currentPos >= 0">
+                  <Icon icon="caret-right" class="mr-1" :style="{ color: 'var(--c-accent)' }" />{{ t('queue.groupNow', {
+                    i: row.currentPos + 1, n: row.members.length,
+                    title: row.members[row.currentPos]!.item.title || t('common.untitled'),
+                  }) }}
+                </template>
+                <template v-else>{{ t('queue.groupSongs', { n: row.members.length, time: formatTime(row.duration) }) }}</template>
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100" @click.stop>
+              <button
+                v-if="row.currentPos !== 0"
+                class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
+                :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
+                :title="t('queue.groupPlay')"
+                :aria-label="t('queue.groupPlay')"
+                @click="act({ action: 'play', index: row.members[0]!.index })"
+              ><Icon icon="play" /></button>
+              <button
+                class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
+                :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
+                :title="t('queue.groupRemove')"
+                :aria-label="t('queue.groupRemove')"
+                @click="act({ action: 'remove_group', group: row.group.key })"
+              ><Icon icon="xmark" /></button>
+            </div>
           </div>
-        </div>
 
-        <!-- text -->
-        <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium" :title="item.title">
-            <span v-if="item.is_current" :style="{ color: 'var(--c-accent)' }">▸ </span>{{ item.title || t('common.untitled') }}
-          </p>
-          <p class="truncate text-xs" :style="{ color: 'var(--c-text-muted)' }">
-            {{ typeLabel(item.type) }}<span v-if="item.duration"> · {{ formatTime(item.duration) }}</span>
-            <span v-if="item.download && !item.is_current" :style="{ color: 'var(--c-accent)' }">
-              · ⇣ {{ item.download.stage === 'downloading' ? `${Math.round(item.download.progress * 100)}%` : t('queue.preparing') }}</span>
-          </p>
-        </div>
-
-        <!-- actions -->
-        <div class="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
-          <button
-            v-if="!item.is_current"
-            class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
-            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-            :title="t('common.playNow')"
-            @click="act({ action: 'play', index: i })"
-          >▶</button>
-          <button
-            v-if="!item.is_current && i !== (status?.current_index ?? -1) + 1"
-            class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
-            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-text)' }"
-            :title="t('common.playNext')"
-            @click="act({ action: 'top', index: i })"
-          >⤴</button>
-          <AddToPlaylist :source="{ source: 'queue', index: i }" />
-          <button
-            class="cursor-pointer rounded-md border-0 px-2 py-1 text-xs"
-            :style="{ background: 'var(--c-surface-2)', color: 'var(--c-danger)' }"
-            :title="t('common.remove')"
-            @click="act({ action: 'remove', index: i })"
-          >✕</button>
-        </div>
-      </li>
+          <ul v-if="expanded.has(row.group.key)" class="flex flex-col gap-1 px-2 pb-2">
+            <QueueRow
+              v-for="m in visibleMembers(row)"
+              :key="`${m.item.id}-${m.index}`"
+              nested
+              :item="m.item"
+              :index="m.index"
+              :is-next="m.index === nextIndex"
+              :drag-over="dragOver === m.index && dragFrom !== null && dragFrom !== m.index"
+              :dragging="dragFrom === m.index"
+              @act="act"
+              @dragstart="onDragStart(m.index, $event)"
+              @dragover="onDragOver(m.index, $event)"
+              @drop.prevent="onDrop(m.index)"
+              @dragend="onDragEnd"
+            />
+            <li v-if="visibleMembers(row).length < row.members.length">
+              <button
+                class="w-full cursor-pointer rounded-lg border-0 bg-transparent py-1.5 text-xs"
+                :style="{ color: 'var(--c-accent)' }"
+                @click="toggleShowAll(row.group.key)"
+              >{{ t('queue.showAll', { n: row.members.length }) }}</button>
+            </li>
+          </ul>
+        </li>
+      </template>
     </ul>
   </section>
 </template>
