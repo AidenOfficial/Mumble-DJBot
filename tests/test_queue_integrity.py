@@ -267,6 +267,56 @@ class FailureDoesNotSkipNextTest(Base):
         self.assertEqual('A', p.launched[0])
 
 
+class ResumeAfterClearTest(Base):
+    """!stop → !clear → 点歌 → !play:resume() 以前先 next() 一次,主循环再 next() 一次,
+    one-shot 把刚加的那首删掉、其他模式跳过它。"""
+
+    def test_oneshot_plays_the_song_added_after_clear(self):
+        var.playlist = fill(mp.OneshotPlaylist(), [W('A'), W('B')], -1)
+        p = Player()
+        p.is_pause = True  # !stop 之后
+        p.resume()
+        p.run(1)
+        self.assertEqual(['A'], p.launched)        # 以前:[] 且 A 被删
+        self.assertEqual(['A', 'B'], ids(var.playlist))  # 假的 launch_music 瞬间播完,再跑一轮 A 才会被 one-shot 删掉
+
+    def test_oneshot_after_a_web_poll_moved_the_pointer(self):
+        var.playlist = fill(mp.OneshotPlaylist(), [W('A'), W('B')], -1)
+        p = Player()
+        p.is_pause = True
+        var.playlist.current_item()  # 网页轮询 /api/status 把 one-shot 的指针从 -1 拨到 0
+        p.resume()
+        p.run(1)
+        self.assertEqual(['A'], p.launched)
+        self.assertEqual(['A', 'B'], ids(var.playlist))
+
+    def test_repeat_mode_starts_from_the_first_song(self):
+        var.playlist = fill(mp.RepeatPlaylist(), [W('A'), W('B')], -1)
+        p = Player()
+        p.is_pause = True
+        p.resume()
+        p.run(2)
+        self.assertEqual(['A'], p.launched)        # 以前:['B']
+
+    def test_resume_with_an_empty_queue_does_nothing(self):
+        var.playlist = fill(mp.OneshotPlaylist(), [], -1)
+        p = Player()
+        p.is_pause = True
+        p.resume()
+        self.assertFalse(p.wait_for_ready)
+        self.assertEqual([], p.run(2))
+
+    def test_resume_while_playing_does_not_relaunch_the_current_song(self):
+        # 正在播 A 时网页点"继续":不能把 wait_for_ready 置上,否则 A 播完会被重放一遍
+        var.playlist = fill(mp.OneshotPlaylist(), [W('A'), W('B')], 0)
+        p = Player()
+        p.thread = FakeProc(rc=0)  # A 正在播(紧接着播完)
+        p.resume()
+        self.assertFalse(p.wait_for_ready)
+        p.run(3)
+        self.assertEqual(['B'], p.launched)
+
+
 class WaitStateTest(Base):
     def test_skip_while_paused_then_resume_downloads_the_new_current(self):
         items = [W('A')] + [W(x, ready='validated') for x in 'BCDE']

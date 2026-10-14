@@ -315,8 +315,10 @@ pyflakes、真实 ffmpeg、桩后端 + Playwright 截图/交互。
   杀掉服务器后 bot 5 s 内退出(日志记录原因);SIGTERM 正常退出存队列;全程无 WARNING。
 - 测试时的坑(不是 bot 的问题):Mumble 服务器默认文字消息限速 burst 5 条、之后 1 条/秒,
   脚本连发命令会被服务器丢掉;测试服务器要把 `messageburst` / `messagelimit` 调大。
-- 顺带发现的既有问题(与本轮无关,未改):one-shot 模式下 `!stop` → `!clear` → 点歌 → `!play`,
-  `resume()` 在 `current_index == -1` 时调一次 `next()`,主循环接着又 `next()` 一次,把刚加的那首直接删掉,什么都不放。
+- 顺带修掉的既有问题(与迁移无关):`!stop` → `!clear` → 点歌 → `!play` 什么都不放。`resume()` 在
+  `current_index == -1` 时调一次 `next()`,主循环接着又 `next()` 一次:one-shot 把刚加的那首删掉,其他模式跳过它;
+  网页轮询把 one-shot 指针从 -1 拨到 0 之后走另一条分支,结果一样。现在 `resume()` 把指针落到第一首后置
+  `wait_for_ready`,让主循环直接从它开始播(tests/test_queue_integrity.py 新增 5 条;真机复验 `!play` 后 0.19 s 出声)。
 - 给 pymumble-rev 的建议(库侧,未改):`PcmBuffer.clear()` 应让正在阻塞的 `write()` 丢弃剩余部分;
   `apply_gain` 逐样本 Python 循环,播放时 bot 进程约 7.5% CPU,可改用 array/numpy 向量化。
 
