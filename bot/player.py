@@ -1044,8 +1044,12 @@ class PlayerMixin:
     def resume(self):
         self.is_pause = False
         if var.playlist.current_index == -1:
-            var.playlist.next()
+            # 队列是 stop / clear 之后重新加的,指针还没落到任何一首上:落到第一首并直接从它开始播。
+            # 以前这里 next() 一次、主循环接着又 next() 一次,one-shot 会把刚加的那首删掉,其他模式会跳过它
             self.playhead = 0
+            if var.playlist.next():
+                self.wait_for_ready = True
+                self.pause_at_id = ""
             return
 
         music_wrapper = var.playlist.current_item()
@@ -1053,6 +1057,12 @@ class PlayerMixin:
         if not music_wrapper or not music_wrapper.id == self.pause_at_id or \
                 not (music_wrapper.is_ready() or self._stream_playable(music_wrapper)):
             self.playhead = 0
+            if music_wrapper and self.thread is None and not self.wait_for_ready \
+                    and var.playlist.mode == 'one-shot':
+                # one-shot 的 current_item() 会被网页轮询从 -1 拨到 0,队首这首还没放过
+                # (放过的会被 next() 删掉):同样直接从它开始播,别让主循环的 next() 把它删掉
+                self.wait_for_ready = True
+                self.pause_at_id = ""
             return
 
         self.wait_for_ready = True
