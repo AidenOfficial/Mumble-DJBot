@@ -1,0 +1,5 @@
+# Dockerfile lint(CI 的 lint job 使用)
+failure-threshold: warning
+ignored:
+  # apt 包锁版本:bookworm 安全更新会让旧版本号从源里消失,锁了反而构建失败
+  - DL3008

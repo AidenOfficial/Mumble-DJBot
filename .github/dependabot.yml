@@ -1,0 +1,40 @@
+# Dependabot 版本更新。安全更新(Dependabot security updates)需在仓库
+# Settings → Code security 里另外开启,与这里互不影响。
+#
+# 刻意没有配置的生态:
+#   pip    —— requirements.txt 不锁版本(镜像构建 / 启动时总装最新的 yt-dlp、spotdl),
+#             pymumble-rev 是 git commit 依赖,Dependabot 都无法更新。
+#   docker —— 基础镜像固定在 python:3.12 / node:22(3.13 起没有 audioop),
+#             Dependabot 只会提议升到不能用的版本。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Tokyo
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: npm
+    directory: /webui
+    # 每月一次:每次升级都要手动重建并提交 webui/dist(见文末说明),频率不宜高
+    schedule:
+      interval: monthly
+      timezone: Asia/Tokyo
+    # npm 包发布后过一周再升,躲开被投毒后很快撤回的版本
+    cooldown:
+      default-days: 7
+    groups:
+      webui-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope
+    # 注意:升级依赖后 webui/dist 会变,CI 的 "webui/dist is stale" 检查会失败,
+    # 合并前需在本地 npm run build 并把新 dist 推到 Dependabot 的分支上。

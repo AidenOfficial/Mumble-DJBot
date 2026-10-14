@@ -347,7 +347,7 @@ class RemoveFromQueueTest(Base):
 
     def test_remove_other_item_leaves_playback_alone(self):
         var.playlist = fill(mp.RepeatPlaylist(), [W('A'), W('B'), W('C')], 1)
-        p = var.bot = Player()
+        var.bot = Player()
         self.web_api._queue_remove(2)
         self.assertEqual(['A', 'B'], ids(var.playlist))
         self.assertEqual('B', var.playlist.current_item().id)

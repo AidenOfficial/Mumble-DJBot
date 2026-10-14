@@ -1,0 +1,217 @@
+# 主 CI:lint、单元测试、Web UI 构建、Docker 镜像构建 + 冒烟。
+# 分支保护只需要把最后的 "CI OK" 设为必需检查。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  # 每周一跑一次:requirements.txt 没锁版本,yt-dlp / spotdl 等上游
+  # 经常发版改行为,定时跑能在用户踩坑前发现不兼容。
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # PR 上新推送会取消旧的运行;master 上的每次提交都跑完
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FORCE_COLOR: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RUFF_VERSION: "0.17.0"
+      ACTIONLINT_VERSION: "1.7.12"
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      HADOLINT_VERSION: "2.15.1"
+      HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 各 linter 互不依赖:前一个失败后面的照样跑,一次把问题全报出来
+      - name: Ruff (Python)
+        if: ${{ !cancelled() }}
+        run: pipx run --spec "ruff==${RUFF_VERSION}" ruff check --output-format=github .
+
+      - name: ShellCheck
+        if: ${{ !cancelled() }}
+        run: |
+          shellcheck --version | head -2
+          git ls-files -z '*.sh' | xargs -0 shellcheck --format=gcc
+
+      - name: Hadolint (Dockerfile)
+        if: ${{ !cancelled() }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/hadolint" \
+            "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  $RUNNER_TEMP/hadolint" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/hadolint"
+          "$RUNNER_TEMP/hadolint" --format tty Dockerfile
+
+      - name: actionlint (workflows)
+        if: ${{ !cancelled() }}
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          # PATH 上有 shellcheck,actionlint 会顺带检查各 run: 脚本
+          "$RUNNER_TEMP/actionlint" -color
+
+  test:
+    name: Test (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 是 Docker 镜像用的版本;3.13 移除了 audioop,需要 audioop-lts
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install system libraries
+        # 与镜像一致:libopus(pymumble-rev)、libmagic(python-magic)、ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libopus0 libmagic1 ffmpeg
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install -r requirements.txt pytest pytest-cov
+          if python -c 'import sys; sys.exit(sys.version_info < (3, 13))'; then
+            python -m pip install audioop-lts
+          fi
+
+      - name: Run tests
+        run: >-
+          python -m pytest tests
+          --junitxml=pytest-results.xml
+          --cov=. --cov-report=xml --cov-report=term-missing:skip-covered
+
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "### Coverage (Python ${{ matrix.python }})"
+            python -m coverage report --format=markdown --skip-covered --sort=cover
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results-py${{ matrix.python }}
+          path: |
+            pytest-results.xml
+            coverage.xml
+          retention-days: 14
+
+  webui:
+    name: Web UI build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # 与 Dockerfile 的 webui-builder stage 一致
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+
+      # vue-tsc 类型检查 + vite 构建
+      - run: npm run build
+
+      - name: Check committed webui/dist is up to date
+        # 不用 Node 的部署直接用仓库里的 dist,改了前端必须一并提交新构建
+        run: |
+          if [ -n "$(git status --porcelain -- dist)" ]; then
+            echo "::error title=webui/dist is stale::webui/dist 与源码构建结果不一致。请在 webui/ 下运行 npm run build 并提交 dist。"
+            git status --short -- dist
+            exit 1
+          fi
+
+  docker:
+    name: Docker build + smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: mumble-music:ci
+          # 只在本机 load 做冒烟,不需要证明;docker exporter 也不支持 attestation
+          provenance: false
+          cache-from: type=gha,scope=ci-amd64
+          cache-to: type=gha,scope=ci-amd64,mode=max
+
+      - name: Smoke test (tools + imports, offline)
+        # 只跑不联网的两项:外部工具齐全(spotdl/deno/yt-dlp/ffmpeg)+ 机器人模块能导入。
+        # B 站 / Spotify 链路依赖外网和凭据,不放进 CI。
+        run: >-
+          docker run --rm --entrypoint venv/bin/python mumble-music:ci
+          scripts/smoke_test.py --only tools --only imports
+
+      - name: Entrypoint shell sanity
+        # entrypoint.sh 遇到 bash/sh 会直接 exec,顺带验证脚本没有 CRLF / 语法问题
+        run: docker run --rm mumble-music:ci bash -c 'bash -n /botamusique/entrypoint.sh && echo ok'
+
+  # 汇总检查:分支保护只需要要求这一个
+  ci-ok:
+    name: CI OK
+    if: ${{ always() }}
+    needs: [lint, test, webui, docker]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: All required jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then
+              echo "::error::至少有一个 job 未通过($r)"
+              exit 1
+            fi
+          done

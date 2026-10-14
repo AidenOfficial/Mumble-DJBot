@@ -1,0 +1,20 @@
+# GitHub 自动生成发布说明的分类规则(按 PR 标签,标签由 pr-triage.yml 自动打)。
+# 一个 PR 只会出现在第一个匹配的分类里。
+changelog:
+  exclude:
+    labels: [skip-changelog]
+  categories:
+    - title: Web UI
+      labels: ["area: webui", "area: web-api"]
+    - title: Bot & playback
+      labels: ["area: bot", "area: commands", "area: media"]
+    - title: Deployment
+      labels: ["area: deploy"]
+    - title: Translations
+      labels: ["area: i18n"]
+    - title: Dependencies
+      labels: [dependencies]
+    - title: CI & tooling
+      labels: [ci]
+    - title: Other changes
+      labels: ["*"]
