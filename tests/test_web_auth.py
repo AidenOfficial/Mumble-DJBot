@@ -61,3 +61,44 @@ def test_snapshot_version_is_commit_or_tag():
     ver = util.get_snapshot_version()
     assert ver and ver != 'unknown'  # 仓库本身是 git 检出
     assert os.getcwd()  # 不再 chdir
+
+
+def test_token_page_when_no_token(interface, monkeypatch):
+    # auth_method=token 且没带 token:渲染 templates/need_token.html(以前依赖旧前端构建出的模板)
+    import constants
+    constants.load_lang('zh_CN')
+    monkeypatch.setattr(var, 'language', 'zh_CN')
+    var.config.set('webinterface', 'auth_method', 'token')
+    var.config.set('bot', 'username', 'dj<bot>')
+    interface.bad_access_count.clear()
+    try:
+        rv = interface.web.test_client().get('/api/status')
+        body = rv.get_data(as_text=True)
+    finally:
+        constants.load_lang('en_US')
+    assert rv.status_code == 200
+    assert '需要登录令牌' in body
+    assert 'dj&lt;bot&gt;' in body  # 机器人名字转义
+    assert '"!web"' in body or '!web' in body
+    assert 'name="token"' in body
+
+
+def test_token_grants_access(interface, monkeypatch):
+    import json
+    var.config.set('webinterface', 'auth_method', 'token')
+    var.db = FakeSettingsDb({('web_token', 'tok123'): 'alice',
+                             ('user', 'alice'): json.dumps({})})
+    var.db.set = lambda *a: None
+    monkeypatch.setattr(interface.web_users, 'resolve_identity', lambda user: user)
+    interface.web.secret_key = 'test'
+    seen = {}
+
+    @interface.requires_auth
+    def protected():
+        from flask import g
+        seen['identity'] = g.web_identity
+        return 'ok'
+
+    with interface.web.test_request_context('/?token=tok123'):
+        assert protected() == 'ok'
+    assert seen['identity'] == 'alice'

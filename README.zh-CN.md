@@ -54,7 +54,7 @@ Mumble-DJBot 可播放来自 YouTube、Bilibili、Spotify、直播、网络电�
 
 ### Web 界面
 
-控制台位于 `/`，原有界面保留在 `/legacy`。
+控制台位于 `/`。
 
 - **Now Playing：** 高清专辑封面（按视频标题去网易云 / iTunes / Deezer 匹配，匹配不上用视频封面）、可拖动的播放进度；准备面板显示当前所处阶段及预计开始播放的时间。
 - **队列：** 支持拖拽排序，并可统一搜索 YouTube 与 Bilibili。

@@ -1,22 +1,12 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { formatBytes } from '../api'
+import { enqueueLibraryItem, fetchLibraryInfo, formatBytes, queryLibrary, type LibraryItem } from '../api'
 import { uploadFile, UploadError } from '../upload'
 import { useStatus } from '../composables/useStatus'
 import AddToPlaylist from './AddToPlaylist.vue'
 import FavButton from './FavButton.vue'
 import { t, typeLabel } from '../i18n'
 import type { Key } from '../i18n/en'
-
-interface LibItem {
-  id: string
-  title: string
-  type: string
-  artist: string
-  path: string
-  thumb: string
-  tags: [string, string][]
-}
 
 const { refresh } = useStatus()
 
@@ -25,7 +15,7 @@ const typeFilter = ref<'file' | 'url' | 'radio' | ''>('')
 const tagFilter = ref('')
 const allTags = ref<string[]>([])
 const uploadEnabled = ref(false)
-const items = ref<LibItem[]>([])
+const items = ref<LibraryItem[]>([])
 const totalPages = ref(0)
 const page = ref(1)
 const loading = ref(false)
@@ -33,8 +23,7 @@ const feedback = ref<Record<string, string>>({})
 
 onMounted(async () => {
   try {
-    const rv = await fetch('../library/info')
-    const info = await rv.json()
+    const info = await fetchLibraryInfo()
     allTags.value = info.tags ?? []
     uploadEnabled.value = !!info.upload_enabled
   } catch { /* non-fatal */ }
@@ -51,16 +40,12 @@ async function query(toPage = 1) {
   loading.value = true
   page.value = toPage
   try {
-    const body = new URLSearchParams({
-      action: 'query',
+    const data = await queryLibrary({
       type: typeFilter.value || 'file,url,radio',
-      dir: '.',
       tags: tagFilter.value,
       keywords: keywords.value,
-      page: String(toPage),
+      page: toPage,
     })
-    const rv = await fetch('../library', { method: 'POST', body })
-    const data = await rv.json()
     items.value = data.items ?? []
     totalPages.value = data.total_pages ?? 0
   } catch {
@@ -71,15 +56,10 @@ async function query(toPage = 1) {
   }
 }
 
-async function add(item: LibItem, next: boolean) {
+async function add(item: LibraryItem, next: boolean) {
   feedback.value[item.id] = '...'
   try {
-    const rv = await fetch('../post', {
-      method: 'POST',
-      body: new URLSearchParams(
-        next ? { add_item_next: item.id } : { add_item_bottom: item.id }),
-    })
-    if (!rv.ok) throw new Error(String(rv.status))
+    await enqueueLibraryItem(item.id, next ? 'next' : 'append')
     feedback.value[item.id] = 'ok'
     refresh()
   } catch {
@@ -143,8 +123,7 @@ async function onUpload(e: Event) {
 async function queueUpload(row: UploadRow) {
   if (!row.itemId) return
   try {
-    const rv = await fetch('../post', { method: 'POST', body: new URLSearchParams({ add_item_bottom: row.itemId }) })
-    if (!rv.ok) throw new Error()
+    await enqueueLibraryItem(row.itemId, 'append')
     row.queued = true
     refresh()
   } catch {
@@ -244,8 +223,8 @@ const TYPES = ['', 'file', 'url', 'radio'] as const
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium" :title="item.title">{{ item.title || item.path }}</p>
           <p class="flex items-center gap-1.5 truncate text-xs" :style="{ color: 'var(--c-text-muted)' }">
-            <span v-if="item.artist && item.artist !== '??'">{{ item.artist }}</span>
-            <span v-for="[tag] in item.tags.slice(0, 3)" :key="tag" class="rounded-full px-1.5 py-0.5 text-[10px]" :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }">{{ tag }}</span>
+            <span v-if="item.artist">{{ item.artist }}</span>
+            <span v-for="tag in item.tags.slice(0, 3)" :key="tag" class="rounded-full px-1.5 py-0.5 text-[10px]" :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }">{{ tag }}</span>
           </p>
         </div>
         <div class="flex shrink-0 gap-1">

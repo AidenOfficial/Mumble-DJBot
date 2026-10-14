@@ -124,8 +124,6 @@ cookies/
 *cookies*.txt
 spotdl_cache/
 
-templates/*.html
-
 # Pycharm
 .idea/
 webui/node_modules/

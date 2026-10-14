@@ -9,7 +9,6 @@ import os
 import io
 import sys
 import variables as var
-import zipfile
 import re
 from urllib.parse import urlparse, urljoin
 import ipaddress
@@ -58,39 +57,6 @@ def get_recursive_file_list_sorted(path):
 
     filelist.sort()
     return filelist
-
-
-# - zips files
-# - returns the absolute path of the created zip file
-# - zip file will be in the applications tmp folder (according to configuration)
-# - format of the filename itself = prefix_hash.zip
-#       - prefix can be controlled by the caller
-#       - hash is a sha1 of the string representation of the directories' contents (which are
-#           zipped)
-def zipdir(files, zipname_prefix=None):
-    zipname = var.tmp_folder
-    if zipname_prefix and '../' not in zipname_prefix:
-        zipname += zipname_prefix.strip().replace('/', '_') + '_'
-
-    _hash = hashlib.sha1(str(files).encode()).hexdigest()
-    zipname += _hash + '.zip'
-
-    if os.path.exists(zipname):
-        return zipname
-
-    zipf = zipfile.ZipFile(zipname, 'w', zipfile.ZIP_DEFLATED)
-
-    for file_to_add in files:
-        if not os.access(file_to_add, os.R_OK):
-            continue
-        if file_to_add in var.config.get('bot', 'ignored_files'):
-            continue
-
-        add_file_as = os.path.basename(file_to_add)
-        zipf.write(file_to_add, add_file_as)
-
-    zipf.close()
-    return zipname
 
 
 # yt-dlp / spotdl 跟着 B 站、YouTube 改版频繁更新;与 entrypoint.sh 的 BAM_UPDATE_ON_START 升级同一组包

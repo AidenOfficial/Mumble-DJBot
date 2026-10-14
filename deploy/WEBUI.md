@@ -13,9 +13,8 @@
 - 应用层不做登录:`[webinterface] auth_method = none` 保持现状,鉴权完全交给
   Cloudflare Access。**因此绝不能把 8181 端口直接暴露公网**——只有 cloudflared
   出站隧道能访问它。
-- 新 UI 在 `/`,旧界面保留在 `/legacy`,JSON API 在 `/api/*`。所有写操作
-  (controls/queue/search-add/上传)与旧接口走同一套 `requires_auth` 约定,
-  auth_method 换成 password/token 时新 UI 无需改动。
+- Web UI 在 `/`,JSON API 在 `/api/*`。所有接口走同一套 `requires_auth` 约定,
+  auth_method 换成 password/token 时 UI 无需改动。
 
 ## 配置项(configuration.ini)
 
@@ -193,7 +192,7 @@ access_aud = <Access 应用 Overview 页的 Application Audience (AUD) Tag>
 
 ## 验证清单(部署后手动)
 
-- [ ] 域名打开即新 UI,`/legacy` 是旧界面,未登录时被 Access 拦截。
+- [ ] 域名打开即 Web UI,未登录时被 Access 拦截。
 - [ ] 直连 NAS IP:8181 从公网不可达(仅 Tunnel 出站)。
 - [ ] `/api/status` 轮询正常、控件/队列/搜索/统计各页可用。
 - [ ] 上传大小上限 `max_upload_file_size` 符合预期;上传一个 >100MB 的视频能成功并只剩音轨。
