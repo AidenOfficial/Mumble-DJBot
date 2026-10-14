@@ -55,6 +55,7 @@ export const en = {
   'np.nothing': 'Nothing playing',
   'np.emptyHint': 'The queue is empty - add something from Mumble or the search page.',
   'np.skipped': 'Skipped: {from}–{to}',
+  'np.seek': 'Playback position',
   'np.bgDownload': 'Still downloading in the background · {pct}%',
   'np.bgDone': 'done in {eta}',
   'np.skipping': {

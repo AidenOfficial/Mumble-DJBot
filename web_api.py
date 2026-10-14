@@ -8,14 +8,16 @@ without a circular import.
 
 import base64
 import hashlib
+import os
 import time
 
-from flask import Blueprint, Response, abort, jsonify, request
+from flask import Blueprint, Response, abort, jsonify, request, send_file
 
 import media.playlist
 import util
 import variables as var
 import web_search
+from media import artwork
 from media.cache import get_cached_wrapper_from_scrap
 from web_users import current_user_name
 
@@ -37,7 +39,10 @@ def _item_summary(wrapper, index):
         'artist': getattr(item, 'artist', '') or '',
         'url': getattr(item, 'url', '') or '',
         'duration': getattr(item, 'duration', 0) or 0,
-        'has_thumbnail': bool(getattr(item, 'thumbnail', None)),
+        'has_thumbnail': bool(getattr(item, 'thumbnail', None)) or artwork.has_hd(item.id),
+        # 封面来源(album / video / embedded / ''),变了说明高清图换了,前端据此刷新图片
+        'artwork': getattr(item, 'artwork', '') or '',
+        'album': getattr(item, 'album', '') or '',
     }
     if getattr(item, 'downloading', False):
         # 后台下载中(预下载/边下边播):队列里显示进度,播放条上画"已缓冲"部分
@@ -237,6 +242,13 @@ def create_blueprint(requires_auth):
                 _set_volume(payload.get('volume'))
             except (TypeError, ValueError):
                 abort(400)
+        elif action == 'seek':
+            try:
+                position = float(payload.get('position'))
+            except (TypeError, ValueError):
+                abort(400)
+            if not var.bot.seek(position):
+                abort(409)  # 没有在放 / 直播电台这类不能跳转的
         else:
             abort(400)
         return jsonify(_status_payload())
@@ -357,9 +369,19 @@ def create_blueprint(requires_auth):
     @api.route('/thumbnail/<item_id>', methods=['GET'])
     @requires_auth
     def api_thumbnail(item_id):
-        """Raw JPEG for an item's thumbnail. Cacheable: the content for a
-        given id never changes, so the frontend fetches it once per song."""
+        """条目封面。默认给高清图(media/artwork.py 存的),还没准备好时先给 100px 的
+        小图并在后台插队准备;?size=small 只要小图(队列行用)。
+        前端在 URL 里带上 artwork 来源(?v=album),换图后地址就变了,所以可以长期缓存。"""
+        if request.args.get('size') != 'small':
+            path = artwork.path_for(item_id)
+            if path and os.path.isfile(path):
+                return send_file(path, mimetype='image/jpeg', max_age=86400, conditional=True)
         item = var.cache.get_item_by_id(item_id)
+        if item is not None and request.args.get('size') != 'small':
+            artwork.ensure(item, urgent=True)
+            fallback = True
+        else:
+            fallback = False
         thumbnail = getattr(item, 'thumbnail', None) if item else None
         if not thumbnail:
             abort(404)
@@ -367,7 +389,8 @@ def create_blueprint(requires_auth):
             data = base64.b64decode(thumbnail)
         except Exception:
             abort(404)
-        return Response(data, mimetype='image/jpeg',
-                        headers={'Cache-Control': 'private, max-age=86400'})
+        # 高清图还没好:别让浏览器把小图缓存下来,好了以后同一地址还要能拿到高清的
+        cache = 'no-cache' if fallback else 'private, max-age=86400'
+        return Response(data, mimetype='image/jpeg', headers={'Cache-Control': cache})
 
     return api

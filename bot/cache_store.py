@@ -347,6 +347,9 @@ def save_to_library(item_id, subfolder='saved'):
     dst = os.path.join(var.music_folder, rel)
     shutil.copyfile(src, dst)
     cover = src + '.jpg'
+    if not os.path.isfile(cover):
+        from media import artwork
+        cover = artwork.path_for(item_id) or ''  # 新条目的封面在 artwork 目录(专辑封面优先)
     if os.path.isfile(cover):
         try:
             shutil.copyfile(cover, os.path.splitext(dst)[0] + '.jpg')

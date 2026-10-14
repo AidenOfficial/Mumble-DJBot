@@ -53,3 +53,68 @@ class TestFadeout:
         pcm = make_pcm(480)
         out = p._fadeout(pcm, stereo=False)
         assert len(out) == len(pcm)
+
+
+class _SeekItem:
+    def __init__(self, type_='url', duration=200):
+        self.type = type_
+        self.duration = duration
+
+
+class _SeekWrapper:
+    def __init__(self, item):
+        self.id = 'w1'
+        self._item = item
+
+    def item(self):
+        return self._item
+
+
+class _SeekPlaylist(list):
+    def current_item(self):
+        return self[0] if self else None
+
+
+class TestSeek:
+    def make(self, item, paused=False):
+        import logging
+        import variables as var
+        p = PlayerMixin()
+        p.log = logging.getLogger('test')
+        p.is_pause = paused
+        p.playhead = 10.0
+        p.pause_at_id = ''
+        p.played = []
+        p.play = lambda index=-1, start_at=0: p.played.append((index, start_at))
+        self._saved = var.playlist
+        var.playlist = _SeekPlaylist([_SeekWrapper(item)] if item else [])
+        return p
+
+    def teardown_method(self):
+        import variables as var
+        var.playlist = getattr(self, '_saved', None)
+
+    def test_seek_while_playing_restarts_at_position(self):
+        p = self.make(_SeekItem())
+        assert p.seek(42.5)
+        assert p.played == [(-1, 42.5)]
+
+    def test_seek_is_clamped(self):
+        p = self.make(_SeekItem(duration=100))
+        assert p.seek(500)
+        assert p.played == [(-1, 99)]
+        assert p.seek(-3)
+        assert p.played[-1] == (-1, 0.0)
+
+    def test_seek_while_paused_only_moves_playhead(self):
+        p = self.make(_SeekItem(), paused=True)
+        assert p.seek(60)
+        assert p.played == []
+        assert p.playhead == 60
+        assert p.pause_at_id == 'w1'  # resume() 会从 60 秒续播
+
+    def test_cannot_seek_radio_or_unknown_duration(self):
+        assert not self.make(_SeekItem('radio', 0)).seek(5)
+        assert not self.make(_SeekItem('livestream', 3600)).seek(5)
+        assert not self.make(_SeekItem('url', 0)).seek(5)
+        assert not self.make(None).seek(5)

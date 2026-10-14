@@ -50,6 +50,7 @@ export const ja: Record<Key, Msg> = {
   'np.nothing': '再生していません',
   'np.emptyHint': 'キューが空です。Mumble か検索ページから曲を追加してください。',
   'np.skipped': 'スキップ：{from}–{to}',
+  'np.seek': '再生位置',
   'np.bgDownload': 'バックグラウンドでダウンロード中 · {pct}%',
   'np.bgDone': 'あと {eta}',
   'np.skipping': '音楽以外の {n} 区間をスキップ（SponsorBlock）',

@@ -15,6 +15,7 @@ import base64
 import util
 from constants import tr_cli as tr
 import media
+from media import artwork
 import variables as var
 from media.item import BaseItem, item_builders, item_loaders, item_id_generators, ValidationFailedError, \
     PreparationFailedError
@@ -52,6 +53,9 @@ class URLItem(BaseItem):
             self.path = var.tmp_folder + self.id
             self.thumbnail = ""
             self.keywords = ""
+            self.artwork = ""
+            self.artist = ""
+            self.album = ""
         else:
             super().__init__(from_dict)
             self.url = from_dict['url']
@@ -59,6 +63,10 @@ class URLItem(BaseItem):
             self.path = from_dict['path']
             self.title = from_dict['title']
             self.thumbnail = from_dict['thumbnail']
+            # 高清封面来源(见 media/artwork.py)和匹配到的歌手/专辑;旧记录没有
+            self.artwork = from_dict.get('artwork', '')
+            self.artist = from_dict.get('artist', '')
+            self.album = from_dict.get('album', '')
 
         self.downloading = False
         # Fraction in [0.0, 1.0] of the current download, updated by the
@@ -100,6 +108,7 @@ class URLItem(BaseItem):
         try:
             self.validating_lock.acquire()
             if self.ready in ['yes', 'validated']:
+                artwork.ensure(self)
                 return True
             if self.downloading:
                 # 正在下载(!repeat、重复点同一链接、切换播放模式都会再校验一次)。
@@ -120,6 +129,7 @@ class URLItem(BaseItem):
                     self._discard_incomplete_download()
                 else:
                     self.ready = "yes"
+                    artwork.ensure(self)
                     return True
 
             # Check if this url is banned
@@ -233,6 +243,7 @@ class URLItem(BaseItem):
                     # 直链可能绑定了读取时拿到的 cookie(B 站 buvid 等),一起留着给下载用
                     self._info, self._info_at = info, time.time()
                     self._info_cookies = list(ydl.cookiejar)
+                artwork.ensure(self, info)  # 后台找专辑封面,不耽误下载
                 self._set_stage('pending')
                 succeed = True
                 return True
@@ -304,8 +315,8 @@ class URLItem(BaseItem):
                 streaming = False
 
         self.log.info("bot: downloading url (%s) %s " % (self.title, self.url))
-        # 封面不再用 yt-dlp 的 writethumbnail 在下载前同步抓取+转换(会推迟音频开始下载),
-        # 改为拿到信息后在后台线程单独下载
+        # 封面不用 yt-dlp 的 writethumbnail 在下载前同步抓取(会推迟音频开始下载),
+        # 由 media/artwork.py 在后台线程准备
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': base_path,
@@ -350,7 +361,7 @@ class URLItem(BaseItem):
                         info = ydl.process_ie_result(info, download=True)
                     else:
                         info = ydl.extract_info(self.url)  # 重试时重新读取,拿新的直链
-                    self._fetch_thumbnail_async(info, base_path)
+                    artwork.ensure(self, info)
                     self._normalize_download_path(info, base_path)
                     download_succeed = True
                     break
@@ -439,28 +450,6 @@ class URLItem(BaseItem):
         info, self._info = self._info, None  # 只用一次,失败重试时重新读取
         return copy.deepcopy(info)
 
-    def _fetch_thumbnail_async(self, info, base_path):
-        url = (info or {}).get('thumbnail')
-        if not url or self.thumbnail:
-            return
-
-        def run():
-            try:
-                import requests
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                if 'hdslb.com' in url or 'bilibili' in url:
-                    headers['Referer'] = 'https://www.bilibili.com/'
-                r = requests.get(url, headers=headers, timeout=10)
-                r.raise_for_status()
-                im = Image.open(BytesIO(r.content))
-                im.convert('RGB').save(base_path + '.jpg', format='JPEG', quality=88)  # 缓存页/存入曲库用
-                self.thumbnail = self._prepare_thumbnail(im)
-                self.version += 1
-            except Exception:
-                self.log.debug("url: thumbnail fetch failed for %s", url, exc_info=True)
-
-        threading.Thread(target=run, name="Thumb-" + self.id[:7], daemon=True).start()
-
     def eta_to_playable(self, playhead, buffer_secs, can_stream):
         """估算还要几秒能开始播放;不知道(还在读信息/连接中、没有速度数据)返回 None。"""
         if self.ready == 'yes':
@@ -518,6 +507,9 @@ class URLItem(BaseItem):
         dict['path'] = self.path
         dict['title'] = self.title
         dict['thumbnail'] = self.thumbnail
+        dict['artwork'] = self.artwork
+        dict['artist'] = self.artist
+        dict['album'] = self.album
 
         return dict
 
