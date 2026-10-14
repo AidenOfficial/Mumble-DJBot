@@ -207,7 +207,10 @@ def main():
         lang = var.config.get('bot', 'language')
 
     if lang not in supported_languages:
-        raise KeyError(f"Unsupported language {lang}")
+        # 只维护 en_US / zh_CN / ja_JP;以前的 de_DE、fr_FR 等语言包已删除,旧配置回退到英文
+        bot_logger.warning(f"Unsupported language {lang}, falling back to en_US. "
+                           f"Available: {', '.join(sorted(supported_languages))}")
+        lang = 'en_US'
     var.language = lang
     constants.load_lang(lang)
 

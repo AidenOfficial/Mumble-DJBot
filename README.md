@@ -113,7 +113,7 @@ channel = Music              ; use a slash for nested channels, e.g. Games/Squad
 [bot]
 username = MusicBot
 admin = YourMumbleName       ; separate multiple administrators with semicolons
-language = en_US             ; zh_CN, ja_JP, fr_FR, de_DE, ... (see lang/)
+language = en_US             ; en_US, zh_CN or ja_JP
 
 [webinterface]
 enabled = True
@@ -251,10 +251,10 @@ npm run build   # writes the production build to webui/dist
 | `mumbleBot.py`, `bot/` | Entry point; connection handling, playback loop (`player.py`), channel following (`channels.py`), cache and cleanup |
 | `media/` | Audio sources (URL, Bilibili, Spotify, live, radio, local files), the play queue, SponsorBlock |
 | `commands/` | Chat command handlers |
-| `interface.py`, `web_*.py` | Flask application: the legacy endpoints and the `/api/*` endpoints |
+| `interface.py`, `web_*.py`, `templates/` | Flask application: authentication and the `/api/*` endpoints |
 | `playlist_import.py` | Playlist import and YouTube matching |
 | `webui/` | Web interface source and build output |
-| `lang/` | Translations for chat messages and help text |
+| `lang/` | Chat messages and help text (English, Simplified Chinese, Japanese) |
 | `deploy/` | Deployment guides and systemd units |
 | `tests/` | Unit tests |
 
