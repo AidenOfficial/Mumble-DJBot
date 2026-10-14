@@ -256,7 +256,7 @@ def cmd_shortlist(bot, user, text, command, parameter):
 
 def cmd_delete_from_library(bot, user, text, command, parameter):
     if not var.config.getboolean("bot", "delete_allowed"):
-        bot.mumble.users[text.actor].send_text_message(tr('not_admin'))
+        bot.send_msg(tr('not_admin'), text)
         return
 
     try:
@@ -313,7 +313,7 @@ def cmd_drop_database(bot, user, text, command, parameter):
         log.info("command: database dropped.")
         bot.send_msg(tr('database_dropped'), text)
     else:
-        bot.mumble.users[text.actor].send_text_message(tr('not_admin'))
+        bot.send_msg(tr('not_admin'), text)
 
 
 def cmd_refresh_cache(bot, user, text, command, parameter):
@@ -322,6 +322,6 @@ def cmd_refresh_cache(bot, user, text, command, parameter):
         log.info("command: Local file cache refreshed.")
         bot.send_msg(tr('cache_refreshed'), text)
     else:
-        bot.mumble.users[text.actor].send_text_message(tr('not_admin'))
+        bot.send_msg(tr('not_admin'), text)
 
 

@@ -119,7 +119,7 @@ def _spotify_feeder_loop(bot, user, url, cancel_event):
     fed = 0
     hard_failures = 0
     while fed < len(tracks):
-        if cancel_event.is_set() or bot.exit or not bot.mumble.is_alive():
+        if cancel_event.is_set() or bot.exit or not bot.mumble.alive:
             log.info("cmd: spotify feeder stopped (cancelled or bot exiting)")
             return
 

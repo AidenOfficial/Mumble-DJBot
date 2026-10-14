@@ -272,6 +272,27 @@ pyflakes、真实 ffmpeg、桩后端 + Playwright 截图/交互。
 - 验证:tests/test_artwork.py 增至 39 条(含上述实机案例),全量 361 passed(另 2 条为容器缺 pymumble 的既有失败);
   实机日志里出错的 12 个标题对真实曲库重跑,全部匹配到正确专辑。
 
+## 第八轮(2026-10-14):换掉 pymumble,改用自维护的 pymumble-rev
+
+- 依赖:`requirements.txt` 从 pymumble(本仓库 pymumble-upstream 镜像分支)换成
+  [pymumble-rev](https://github.com/AidenOfficial/PyMumble)(asyncio + sans-IO 重写,MIT),锁定 commit。
+  Dockerfile 显式装 `libopus0`。pymumble-upstream 分支已不再被引用,要不要删由用户决定。
+- 适配层 `bot/mumble_link.py`:全仓库只有它 import 通信库。状态是不可变快照(任意线程直接读、不用锁);
+  回调在独立的事件分发线程里执行,单个回调抛异常只记日志;断线时关掉音频缓冲,解开卡在写音频上的播放线程。
+- 播放:不再轮询 `get_buffer_size()` 再 sleep,改为往 0.5 秒的 PcmBuffer 阻塞写;音量在发送端按帧施加,
+  `!volume` / 闪避不用等缓冲里的 0.5 秒播完。切歌 / 停止 / 暂停先在发送端 20 ms 淡出再清空缓冲,立即安静。
+- 顺带修掉:`--tokens` / `BAM_TOKENS` 没 split(被当成逐字符 token);`!joinme <token>` 改用令牌更新消息
+  (以前跨线程直接写 socket);同步阶段已在线的用户也记入跟随逻辑的"所在频道"表。
+- 验证:全量 370 passed(含新增 tests/test_mumble_link.py 7 条;之前因缺 pymumble 失败的 2 条恢复通过)。
+  容器内装了真实 mumble-server 1.5.517,让迁移后的 bot 连上去,由另一个客户端在频道里收听实测:
+  `!file` 0.23 s 出声、频率 440 Hz 正确;`!volume 20` RMS 1354 → 307(预期 ~339);`!skip` 后旧歌 0.01 s 内消失
+  (以前约 0.5 s);`!pause` 0.01 s 安静、`!play` 0.13 s 续播、暂停位置与实际听到的一致;
+  有人说话时闪避生效(RMS 1393 → 57,说完恢复到 1289);`!stop` 后不再发包;SIGTERM 正常退出。
+
+### 待本机复验(第八轮)
+- 用真实服务器和真实歌曲(YouTube / B 站 / 电台)各放一首,确认音质、切歌、暂停续播、闪避正常。
+- 用带客户端证书的配置(`[server] certificate`)连一次,确认注册用户身份照常。
+
 ## DECISIONS 待决区
 
 ### ⚠️ push 被 403 拒绝(需要用户处理)

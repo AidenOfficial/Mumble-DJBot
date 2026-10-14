@@ -12,14 +12,13 @@ import traceback
 
 from packaging import version
 
-from mumble import Mumble
-from mumble.constants import CONN_STATE
 
 import util
 import variables as var
 from constants import tr_cli as tr
 
 from .channels import ChannelMixin
+from .mumble_link import MumbleLink
 from .player import PlayerMixin
 
 
@@ -105,11 +104,10 @@ class MumbleBot(PlayerMixin, ChannelMixin):
         else:
             certificate = util.solve_filepath(var.config.get("server", "certificate"))
 
-        if args.tokens:
-            tokens = args.tokens
-        else:
-            tokens = var.config.get("server", "tokens")
-            tokens = tokens.split(',')
+        # 命令行 / BAM_TOKENS 和配置文件一样是逗号分隔的字符串;
+        # 以前命令行这条路没 split,字符串被当成逐字符的 token 列表传给了服务器
+        tokens = args.tokens if args.tokens else var.config.get("server", "tokens")
+        tokens = [t.strip() for t in tokens.split(',') if t.strip()]
 
 
         if args.user:
@@ -122,39 +120,34 @@ class MumbleBot(PlayerMixin, ChannelMixin):
         else:
             self.bandwidth = var.config.getint("bot", "bandwidth")
 
-        self.mumble = Mumble(host, self.username, port=port, password=password, tokens=tokens,
-                             stereo=self.stereo,
-                             debug=var.config.getboolean('debug', 'mumble_connection'),
-                             certfile=certificate or None)
+        self.mumble = MumbleLink(host, port, self.username, password=password, tokens=tokens,
+                                 certfile=certificate or None, stereo=self.stereo,
+                                 bitrate=self.bandwidth,
+                                 debug=var.config.getboolean('debug', 'mumble_connection'))
         self._start_message_worker()
-        self.mumble.callbacks.text_message_received.set_handler(self.message_received)
+        self.mumble.on_text = self.message_received
 
-        # Sound reception is decided per user queue in pymumble 2.x. Keep it
-        # off unless ducking needs it (decoding every incoming packet is pure
-        # CPU waste otherwise), and apply the current state to users that
-        # appear later.
+        # 收语音只给闪避(ducking)用:默认关掉,省得解码每个收到的包
         self._receive_sound = False
-        # 每种回调只能挂一个 handler:统一在这里分发给声音接收、跟随、没人时暂停三块逻辑
         self._init_follow()
         self.bots = set()
-        self.mumble.callbacks.user_created.set_handler(self._on_user_created)
-        self.mumble.callbacks.user_updated.set_handler(self._on_user_updated)
-        self.mumble.callbacks.user_removed.set_handler(self._on_user_removed)
+        self.mumble.on_user_joined = self._on_user_created
+        self.mumble.on_user_updated = self._on_user_updated
+        self.mumble.on_user_left = self._on_user_removed
 
-        self.mumble.set_codec_profile("audio")
-        self.mumble.start()  # start the mumble thread
-        # wait for the connection; on failure the ready lock is never released,
-        # so rely on the timeout instead of blocking forever.
-        if not self.mumble.wait_until_connected(timeout=60) \
-                or self.mumble.connected != CONN_STATE.CONNECTED:
-            self.log.error("bot: failed to connect to the Mumble server.")
+        try:
+            self.mumble.connect()
+        except Exception as e:
+            self.log.error("bot: failed to connect to the Mumble server: %s", e)
             sys.exit(1)
+        # 同步阶段的用户不会逐个触发"加入"回调:直接从快照记下每人所在频道,跟随逻辑要用
+        for user in self.mumble.users.values():
+            self._user_channels[user.session] = user.channel_id
 
         self.set_comment()
         self.set_avatar()
-        self.mumble.users.myself.self_mute = False  # by sure the user is not muted
+        self.mumble.set_self_mute(False)  # by sure the user is not muted
         self.join_channel()
-        self.mumble.set_bandwidth(self.bandwidth)
 
         bots = var.config.get("bot", "when_nobody_in_channel_ignore",fallback="")
         self.bots = set(b.strip() for b in bots.split(',') if b.strip())
@@ -195,7 +188,7 @@ class MumbleBot(PlayerMixin, ChannelMixin):
         if not var.db.has_option("bot", "ducking") and var.config.getboolean("bot", "ducking") \
                 or var.config.getboolean("bot", "ducking"):
             self.is_ducking = True
-            self.mumble.callbacks.sound_received.set_handler(self.ducking_sound_received)
+            self.mumble.on_voice = self.ducking_sound_received
             self.set_receive_sound(True)
 
         assert var.config.get("bot", "when_nobody_in_channel") in ['pause', 'pause_resume', 'stop', 'nothing', ''], \
@@ -267,40 +260,33 @@ class MumbleBot(PlayerMixin, ChannelMixin):
                 self.log.debug("bot: command added: " + command)
 
     def set_comment(self):
-        self.mumble.users.myself.comment = var.config.get('bot', 'comment')
+        self.mumble.set_comment(var.config.get('bot', 'comment'))
 
     def set_avatar(self):
         avatar_path = var.config.get('bot', 'avatar')
 
         if avatar_path:
             with open(avatar_path, 'rb') as avatar_file:
-                self.mumble.users.myself.texture = avatar_file.read()
+                self.mumble.set_avatar(avatar_file.read())
         else:
-            self.mumble.users.myself.texture = b''
+            self.mumble.set_avatar(b'')
 
     def set_receive_sound(self, value):
-        # pymumble 2.x has no global receive toggle: reception is decided per
-        # user audio queue. Remember the desired state and apply it to every
-        # known user; _on_user_created applies it to users that appear later.
         self._receive_sound = value
-        for user in self.mumble.users.by_session().values():
-            if user.sound:
-                user.sound.set_receive_sound(value)
+        self.mumble.receive_voice = value
 
     def _on_user_created(self, user):
-        if user.sound:
-            user.sound.set_receive_sound(self._receive_sound)
         self._note_user_event(user, 'created')
 
-    def _on_user_updated(self, user, actions):
-        if 'channel_id' not in (actions or {}) and 'session' not in (actions or {}):
+    def _on_user_updated(self, user, changed):
+        if 'channel_id' not in (changed or ()):
             return  # 只关心换频道(静音、评论之类的更新忽略)
         self._note_user_event(user, 'updated')
-        self._dispatch_users_changed(user, actions)
+        self._dispatch_users_changed(user, changed)
 
-    def _on_user_removed(self, user, message):
+    def _on_user_removed(self, user):
         self._note_user_event(user, 'removed')
-        self._dispatch_users_changed(user, message)
+        self._dispatch_users_changed(user, 'removed')
 
     def _dispatch_users_changed(self, user, action):
         if getattr(self, '_react_to_empty_channel', False):
@@ -311,10 +297,8 @@ class MumbleBot(PlayerMixin, ChannelMixin):
     # =======================
 
     def _start_message_worker(self):
-        # pymumble 在自己的主循环线程里同步调用回调,而往服务器发音频包也是这个线程。
-        # 以前直接在回调里处理命令:点歌要建条目、写库、起校验线程(还 sleep 0.1s)、
-        # 回消息,处理多久音频就断多久——在聊天框点歌会卡顿约 1 秒。
-        # 现在回调只把消息放进队列,由单独的线程按顺序处理。
+        # 回调在连接层的事件分发线程里依次执行;命令处理可能很慢(建条目、写库、起校验线程、
+        # 回消息),放在那里会拖住后面的用户/频道事件。回调只把消息入队,由单独的线程按顺序处理。
         self._message_queue = queue.Queue()
         th = threading.Thread(target=self._message_worker, name="CommandWorker", daemon=True)
         th.start()
@@ -330,7 +314,7 @@ class MumbleBot(PlayerMixin, ChannelMixin):
 
     # All text send to the chat is analysed by this function
     def message_received(self, text):
-        """pymumble 回调(在它的网络/音频线程里):只入队,立刻返回。"""
+        """连接层回调(在事件分发线程里):只入队,立刻返回。"""
         message_queue = getattr(self, '_message_queue', None)
         if message_queue is None:
             # 没走 __init__ 的场景(测试替身):退回同步处理
@@ -369,20 +353,20 @@ class MumbleBot(PlayerMixin, ChannelMixin):
 
             # Anti stupid guy function
             if not self.is_admin(user) and not var.config.getboolean('bot', 'allow_private_message') and text.session:
-                self.mumble.users[text.actor].send_text_message(
+                self.mumble.send_private(text.actor,
                     tr('pm_not_allowed'))
                 return
 
             for i in var.db.items("user_ban"):
                 if user.lower() == i[0]:
-                    self.mumble.users[text.actor].send_text_message(
+                    self.mumble.send_private(text.actor,
                         tr('user_ban'))
                     return
 
             if not self.is_admin(user) and argument:
                 input_url = util.get_url_from_input(argument)
                 if input_url and var.db.has_option('url_ban', input_url):
-                    self.mumble.users[text.actor].send_text_message(
+                    self.mumble.send_private(text.actor,
                         tr('url_ban'))
                     return
 
@@ -403,23 +387,23 @@ class MumbleBot(PlayerMixin, ChannelMixin):
                         command_exc = matches[0]
 
                     elif len(matches) > 1:
-                        self.mumble.users[text.actor].send_text_message(
+                        self.mumble.send_private(text.actor,
                             tr('which_command', commands="<br>".join(matches)))
                         return
                     else:
-                        self.mumble.users[text.actor].send_text_message(
+                        self.mumble.send_private(text.actor,
                             tr('bad_command', command=command))
                         return
 
                 if self.cmd_handle[command_exc]['admin'] and not self.is_admin(user):
-                    self.mumble.users[text.actor].send_text_message(tr('not_admin'))
+                    self.mumble.send_private(text.actor, tr('not_admin'))
                     return
 
                 if not self.cmd_handle[command_exc]['access_outside_channel'] \
                         and not self.is_admin(user) \
                         and not var.config.getboolean('bot', 'allow_other_channel_message') \
-                        and self.mumble.users[text.actor].channel_id != self.mumble.users.myself.channel_id:
-                    self.mumble.users[text.actor].send_text_message(
+                        and self.mumble.users[text.actor].channel_id != self.mumble.my_channel_id:
+                    self.mumble.send_private(text.actor,
                         tr('not_in_my_channel'))
                     return
 
@@ -436,15 +420,14 @@ class MumbleBot(PlayerMixin, ChannelMixin):
         try:
             msg = msg.encode('utf-8', 'ignore').decode('utf-8')
             # text if the object message, contain information if direct message or channel message
-            self.mumble.users[text.actor].send_text_message(msg)
+            self.mumble.send_private(text.actor, msg)
         except Exception:
             self.log.warning("bot: could not send private message", exc_info=True)
 
     def send_channel_msg(self, msg):
         try:
             msg = msg.encode('utf-8', 'ignore').decode('utf-8')
-            own_channel = self.mumble.channels[self.mumble.users.myself.channel_id]
-            own_channel.send_text_message(msg)
+            self.mumble.send_channel(self.mumble.my_channel_id, msg)
         except Exception:
             self.log.warning("bot: could not send channel message", exc_info=True)
 
@@ -461,11 +444,10 @@ class MumbleBot(PlayerMixin, ChannelMixin):
     # =======================
 
     def get_user_count_in_channel(self):
-        # Get the channel, based on the channel id
-        own_channel = self.mumble.channels[self.mumble.users.myself.channel_id]
+        mine = self.mumble.my_channel_id
 
         # Build set of unique usernames
-        users = set([user.name for user in own_channel.get_users()])
+        users = set(user.name for user in self.mumble.users.values() if user.channel_id == mine)
 
         # Exclude all bots from the set of usernames
         users = users.difference(self.bots)

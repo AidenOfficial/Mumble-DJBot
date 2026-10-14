@@ -45,7 +45,7 @@ def cmd_ducking(bot, user, text, command, parameter):
     if parameter == "" or parameter == "on":
         bot.is_ducking = True
         var.db.set('bot', 'ducking', True)
-        bot.mumble.callbacks.sound_received.set_handler(bot.ducking_sound_received)
+        bot.mumble.on_voice = bot.ducking_sound_received
         bot.set_receive_sound(True)
         log.info('cmd: ducking is on')
         msg = "Ducking on."
