@@ -227,6 +227,31 @@ pyflakes、真实 ffmpeg、桩后端 + Playwright 截图/交互。
    "unexpected error while downloading"。
 3. 重启 bot 后队列里的歌单分组还在。
 
+## 第六轮(2026-10-14):高清专辑封面、进度条拖动
+
+- 封面糊的根因:所有封面入库时被压成 100×100(`_prepare_thumbnail`),播放页 288px 框直接拉伸。
+  新增 `media/artwork.py`:高清图另存在 `artwork_folder`(默认 settings 数据库旁的 `artwork/`,
+  LRU 上限 `artwork_folder_max_size`),100px 的 thumbnail 保留给 Mumble 聊天/旧版界面。
+- 专辑封面:按视频标题解析候选歌名(书名号/引号 > "歌手 - 歌名" / "歌名 / 歌手" > 整个标题),
+  YouTube Music 自带的 track/artist 优先;依次查网易云(中日文原名)/ iTunes(JP 商店)/ Deezer
+  (英文歌名先查 Deezer)。校验:歌名完全一致(简繁/全半角/括号版本标注归一),且歌手出现在
+  标题/UP 主/标签/简介里,或时长 2 秒内且只有一位歌手对得上;翻唱/钢琴版/Live/合集视频不查;
+  曲库里的翻唱、伴奏、remix 版本排除;合辑封面只在找不到原专辑时才用。都不满足 → 视频封面
+  (取 yt-dlp 给的最大图)。实测 YouTube「米津玄師 - Lemon」→ Deezer 官方 1000×1000 封面。
+- 本地文件:按需导出文件内嵌封面原图;没有封面但有标题+歌手标签时也去曲库找。
+- 播放页:高清图,视频封面整张显示 + 同图模糊衬底;显示匹配到的歌手 · 专辑。
+- 进度条:点击/拖动跳转(松手才发请求),←/→ 5 秒、PgUp/PgDn 30 秒(停手 0.4 秒后合并成一次)。
+  新增 `POST /api/controls {action: seek, position}` → `bot.seek()`:播放中从该位置重启 ffmpeg,
+  暂停中只改位置;直播/电台/无时长返回 409。
+- 配置:`artwork_lookup`、`artwork_itunes_country`、`artwork_folder`、`artwork_folder_max_size`。
+- 测试:新增 tests/test_artwork.py(26 条)、seek 相关 9 条,全量 348 passed(另 2 条为容器缺
+  pymumble 的既有失败)。Playwright 对假后端验证拖动/键盘跳转只发一次请求。
+
+### 待本机复验(第六轮)
+1. 点几首 B 站视频(容器里 B 站 412/地区限制,没法实测):播放页先出视频封面,几秒后换成专辑封面;
+   日志 `artwork:` 行能看到匹配来源。翻唱/现场视频应保持视频封面。
+2. 拖动进度条到未下载完的位置(边下边播):应等缓冲够了再出声,不跳歌。
+
 ## DECISIONS 待决区
 
 ### ⚠️ push 被 403 拒绝(需要用户处理)

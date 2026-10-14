@@ -259,6 +259,10 @@ def main():
     var.cleaner = CacheCleaner()
     var.cleaner.start()
 
+    # 高清封面 / 专辑封面(后台排队获取)
+    from media import artwork
+    artwork.start()
+
     # ============================
     #   Crash safety / watchdog
     # ============================

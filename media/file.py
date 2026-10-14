@@ -4,6 +4,7 @@ from io import BytesIO
 import base64
 import hashlib
 import mutagen
+import mutagen.flac
 from PIL import Image
 
 import util
@@ -48,6 +49,7 @@ class FileItem(BaseItem):
             self.title = ""
             self.artist = ""
             self.thumbnail = None
+            self.artwork = ""  # 高清封面来源,见 media/artwork.py
             self.id = hashlib.md5(path.encode()).hexdigest()
             if os.path.exists(self.uri()):
                 self._get_info_from_tag()
@@ -58,6 +60,7 @@ class FileItem(BaseItem):
             super().__init__(from_dict)
             self.artist = from_dict['artist']
             self.thumbnail = from_dict['thumbnail']
+            self.artwork = from_dict.get('artwork', '')
             try:
                 self.validate()
             except ValidationFailedError:
@@ -84,102 +87,82 @@ class FileItem(BaseItem):
         return True
 
     def _get_info_from_tag(self):
-        path, file_name_ext = os.path.split(self.uri())
-        file_name, ext = os.path.splitext(file_name_ext)
-
-        assert path is not None and file_name is not None
+        file_name = os.path.splitext(os.path.basename(self.uri()))[0]
+        try:
+            tags = mutagen.File(self.uri())
+            ext = os.path.splitext(self.uri())[1].lower()
+            if tags is not None:
+                if ext == ".mp3":
+                    # title: TIT2, artist: TPE1
+                    if 'TIT2' in tags:
+                        self.title = tags['TIT2'].text[0]
+                    if 'TPE1' in tags:
+                        self.artist = tags['TPE1'].text[0]
+                elif ext in (".m4a", ".m4b", ".mp4", ".m4p"):
+                    # title: ©nam, artist: ©ART
+                    if '©nam' in tags:
+                        self.title = tags['©nam'][0]
+                    if '©ART' in tags:
+                        self.artist = tags['©ART'][0]
+                elif ext in (".opus", ".flac"):
+                    if 'title' in tags:
+                        self.title = tags['title'][0]
+                    if 'artist' in tags:
+                        self.artist = tags['artist'][0]
+        except Exception:
+            pass
 
         try:
-            im = None
-            path_thumbnail = os.path.join(path, file_name + ".jpg")
-
-            if os.path.isfile(path_thumbnail):
-                im = Image.open(path_thumbnail)
-            else:
-                path_thumbnail = os.path.join(path, "cover.jpg")
-                if os.path.isfile(path_thumbnail):
-                    im = Image.open(path_thumbnail)
-
-            if ext == ".mp3":
-                # title: TIT2
-                # artist: TPE1, TPE2
-                # album: TALB
-                # cover artwork: APIC:
-                tags = mutagen.File(self.uri())
-                if 'TIT2' in tags:
-                    self.title = tags['TIT2'].text[0]
-                if 'TPE1' in tags:  # artist
-                    self.artist = tags['TPE1'].text[0]
-
-                if im is None:
-                    if "APIC:" in tags:
-                        im = Image.open(BytesIO(tags["APIC:"].data))
-
-            elif ext == ".m4a" or ext == ".m4b" or ext == ".mp4" or ext == ".m4p":
-                # title: ©nam (\xa9nam)
-                # artist: ©ART
-                # album: ©alb
-                # cover artwork: covr
-                tags = mutagen.File(self.uri())
-                if '©nam' in tags:
-                    self.title = tags['©nam'][0]
-                if '©ART' in tags:  # artist
-                    self.artist = tags['©ART'][0]
-
-                if im is None:
-                    if "covr" in tags:
-                        im = Image.open(BytesIO(tags["covr"][0]))
-
-            elif ext == ".opus":
-                # title: 'title'
-                # artist: 'artist'
-                # album: 'album'
-                # cover artwork: 'metadata_block_picture', and then:
-                ##                          |
-                ##                          |
-                ##                          v
-                ##            Decode string as base64 binary
-                ##                          |
-                ##                          v
-                ##      Open that binary as a mutagen.flac.Picture
-                ##                          |
-                ##                          v
-                ##              Extract binary image data
-                tags = mutagen.File(self.uri())
-                if 'title' in tags:
-                    self.title = tags['title'][0]
-                if 'artist' in tags:
-                    self.artist = tags['artist'][0]
-
-                if im is None:
-                    if 'metadata_block_picture' in tags:
-                        pic_as_base64 = tags['metadata_block_picture'][0]
-                        as_flac_picture = mutagen.flac.Picture(base64.b64decode(pic_as_base64))
-                        im = Image.open(BytesIO(as_flac_picture.data))
-
-            elif ext == ".flac":
-                # title: 'title'
-                # artist: 'artist'
-                # album: 'album'
-                # cover artwork: tags.pictures
-                tags = mutagen.File(self.uri())
-                if 'title' in tags:
-                    self.title = tags['title'][0]
-                if 'artist' in tags:
-                    self.artist = tags['artist'][0]
-
-                if im is None:
-                    for flac_picture in tags.pictures:
-                        if flac_picture.type == 3:
-                            im = Image.open(BytesIO(flac_picture.data))
-
-            if im:
+            im = self.cover_image()
+            if im is not None:
                 self.thumbnail = self._prepare_thumbnail(im)
-        except:
+        except Exception:
             pass
 
         if not self.title:
             self.title = file_name
+
+    def cover_image(self):
+        """封面原图(PIL Image),没有返回 None。顺序:同名 .jpg、目录下 cover.jpg、文件内嵌封面。
+        这里只读文件;高清版由 media/artwork.py 在需要时另存。"""
+        path, file_name_ext = os.path.split(self.uri())
+        file_name, ext = os.path.splitext(file_name_ext)
+        ext = ext.lower()
+        for sidecar in (os.path.join(path, file_name + ".jpg"), os.path.join(path, "cover.jpg")):
+            if os.path.isfile(sidecar):
+                im = Image.open(sidecar)
+                im.load()
+                return im
+        try:
+            tags = mutagen.File(self.uri())
+        except Exception:
+            return None
+        if tags is None:
+            return None
+        data = None
+        if ext == ".mp3":
+            # cover artwork: APIC:(有的文件带描述,键名是 "APIC:Cover")
+            apic = [k for k in tags.keys() if k.startswith('APIC')]
+            if apic:
+                data = tags[apic[0]].data
+        elif ext in (".m4a", ".m4b", ".mp4", ".m4p"):
+            if "covr" in tags:
+                data = bytes(tags["covr"][0])
+        elif ext == ".opus":
+            # metadata_block_picture: base64 编码的 FLAC Picture 结构
+            if 'metadata_block_picture' in tags:
+                pic = mutagen.flac.Picture(base64.b64decode(tags['metadata_block_picture'][0]))
+                data = pic.data
+        elif ext == ".flac":
+            pictures = getattr(tags, 'pictures', [])
+            front = [p for p in pictures if p.type == 3] or pictures
+            if front:
+                data = front[0].data
+        if not data:
+            return None
+        im = Image.open(BytesIO(data))
+        im.load()
+        return im
 
     @staticmethod
     def _prepare_thumbnail(im):
@@ -196,6 +179,7 @@ class FileItem(BaseItem):
         dict['title'] = self.title
         dict['artist'] = self.artist
         dict['thumbnail'] = self.thumbnail
+        dict['artwork'] = self.artwork
         return dict
 
     def format_debug_string(self):

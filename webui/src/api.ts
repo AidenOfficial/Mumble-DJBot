@@ -9,6 +9,9 @@ export interface CurrentItem {
   url: string
   duration: number
   has_thumbnail: boolean
+  /** 高清封面来源:album(专辑封面)/ video(视频封面)/ embedded(文件内嵌)/ ''(还没准备好) */
+  artwork: string
+  album: string
   /** SponsorBlock 会跳过的片段 [开始, 结束](秒),只有当前曲有 */
   skip_segments?: [number, number][]
   /** 后台下载中(预下载 / 边下边播)才有 */
@@ -91,6 +94,7 @@ export type ControlAction =
   | { action: 'pause' | 'resume' | 'skip' | 'stop' | 'clear' }
   | { action: 'mode'; mode: string }
   | { action: 'volume'; volume: number }
+  | { action: 'seek'; position: number }
 
 export const postControls = (body: ControlAction) => postJson<BotStatus>('/api/controls', body)
 
@@ -102,8 +106,10 @@ export type QueueAction =
 
 export const postQueue = (body: QueueAction) => postJson<BotStatus>('/api/queue', body)
 
-export function thumbnailUrl(id: string): string {
-  return `${BASE}/api/thumbnail/${encodeURIComponent(id)}`
+/** 封面地址。small:队列行用的 100px 小图;否则高清图,带上 artwork 来源当版本号(换图后地址变化,缓存失效)。 */
+export function thumbnailUrl(id: string, opts: { small?: boolean; version?: string } = {}): string {
+  const q = opts.small ? '?size=small' : `?v=${encodeURIComponent(opts.version || 'pending')}`
+  return `${BASE}/api/thumbnail/${encodeURIComponent(id)}${q}`
 }
 
 // ---- 身份 / 别名 --------------------------------------------------------

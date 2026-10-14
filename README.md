@@ -56,7 +56,7 @@ The project is a fork of [azlux/botamusique](https://github.com/azlux/botamusiqu
 
 The dashboard is served at `/`. The original interface remains available at `/legacy`.
 
-- **Now Playing:** artwork, progress, and a preparation panel that shows the current stage and the estimated time until playback starts.
+- **Now Playing:** high-resolution album artwork (looked up on NetEase Cloud Music, iTunes and Deezer from the video title, with the video thumbnail as a fallback), a draggable progress bar, and a preparation panel that shows the current stage and the estimated time until playback starts.
 - **Queue:** drag-and-drop reordering, plus unified search across YouTube and Bilibili.
 - **Library:** browsing and resumable chunked uploads (up to 4 GB per file by default). Audio is extracted from video files.
 - **Cache:** storage use and play counts. Frequently played tracks can be pinned or saved to the library. When the size limit is reached, the least recently used tracks are evicted first.

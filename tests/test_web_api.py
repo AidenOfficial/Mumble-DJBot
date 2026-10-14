@@ -1,6 +1,7 @@
 import base64
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -122,6 +123,10 @@ class FakeBot:
     def play(self, index=-1, start_at=0):
         self.calls.append(('play', index))
 
+    def seek(self, position):
+        self.calls.append(('seek', position))
+        return position < 1000
+
     def async_download_next(self):
         self.calls.append('async_download_next')
 
@@ -207,11 +212,40 @@ class WebApiTestCase(unittest.TestCase):
     def test_thumbnail_roundtrip(self):
         raw = b'\xff\xd8fakejpegdata'
         self.item.thumbnail = base64.b64encode(raw).decode()
-        rv = self.client.get('/api/thumbnail/abc123')
+        rv = self.client.get('/api/thumbnail/abc123?size=small')
         self.assertEqual(200, rv.status_code)
         self.assertEqual('image/jpeg', rv.mimetype)
         self.assertEqual(raw, rv.data)
         self.assertIn('max-age', rv.headers.get('Cache-Control', ''))
+
+    def test_thumbnail_hd_falls_back_to_small_uncached(self):
+        # 高清图还没准备好:先给小图,但不能让浏览器缓存
+        raw = b'\xff\xd8small'
+        self.item.thumbnail = base64.b64encode(raw).decode()
+        with tempfile.TemporaryDirectory() as tmp:
+            var.config.set('bot', 'artwork_folder', tmp)
+            rv = self.client.get('/api/thumbnail/abc123?v=pending')
+            self.assertEqual(raw, rv.data)
+            self.assertEqual('no-cache', rv.headers.get('Cache-Control'))
+
+    def test_thumbnail_serves_hd_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            var.config.set('bot', 'artwork_folder', tmp)
+            with open(os.path.join(tmp, 'abc123.jpg'), 'wb') as f:
+                f.write(b'\xff\xd8hd')
+            rv = self.client.get('/api/thumbnail/abc123?v=album')
+            self.assertEqual(200, rv.status_code)
+            self.assertEqual(b'\xff\xd8hd', rv.data)
+            rv.close()
+            # 小图请求不受影响
+            self.assertEqual(404, self.client.get('/api/thumbnail/abc123?size=small').status_code)
+            # 有高清图就算有封面
+            self.assertTrue(self.client.get('/api/status').get_json()['current']['has_thumbnail'])
+
+    def test_thumbnail_rejects_path_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            var.config.set('bot', 'artwork_folder', tmp)
+            self.assertEqual(404, self.client.get('/api/thumbnail/..%2F..%2Fetc%2Fpasswd').status_code)
 
     def test_thumbnail_missing(self):
         self.assertEqual(404, self.client.get('/api/thumbnail/abc123').status_code)
@@ -234,6 +268,14 @@ class WebApiTestCase(unittest.TestCase):
         data = self.post_controls(action='resume').get_json()
         self.assertIn('resume', var.bot.calls)
         self.assertTrue(data['play'])
+
+    def test_controls_seek(self):
+        rv = self.post_controls(action='seek', position=42.5)
+        self.assertEqual(200, rv.status_code)
+        self.assertEqual([('seek', 42.5)], var.bot.calls)
+        self.assertEqual(400, self.post_controls(action='seek', position='x').status_code)
+        self.assertEqual(400, self.post_controls(action='seek').status_code)
+        self.assertEqual(409, self.post_controls(action='seek', position=5000).status_code)
 
     def test_controls_skip_while_playing_interrupts(self):
         self.post_controls(action='skip')

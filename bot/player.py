@@ -975,6 +975,25 @@ class PlayerMixin:
         self.song_start_at = -1
         self.playhead = start_at
 
+    def seek(self, position):
+        """跳到当前曲目的 position 秒(网页拖进度条)。暂停中只改位置,恢复播放时从这里开始。
+        直播/电台、没有时长的条目不能跳,返回 False。"""
+        current = var.playlist.current_item() if len(var.playlist) > 0 else None
+        if not current:
+            return False
+        item = current.item()
+        duration = getattr(item, 'duration', 0) or 0
+        if item.type in ('radio', 'livestream') or duration <= 0:
+            return False
+        position = max(0.0, min(float(position), duration - 1))
+        self.log.info("bot: seek to %.1f s.", position)
+        if self.is_pause:
+            self.playhead = position
+            self.pause_at_id = current.id  # resume() 只有 id 对得上才会从 playhead 续播
+            return True
+        self.play(-1, position)
+        return True
+
     def clear(self):
         # Kill the ffmpeg thread and empty the playlist
         self.interrupt()

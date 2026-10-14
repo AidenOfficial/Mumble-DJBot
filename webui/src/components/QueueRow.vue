@@ -37,7 +37,7 @@ const emit = defineEmits<{ act: [body: QueueAction] }>()
     <Icon icon="grip-vertical" class="shrink-0 select-none text-xs" :style="{ color: 'var(--c-text-faint)' }" aria-hidden="true" />
     <!-- art -->
     <div class="h-10 w-10 shrink-0 overflow-hidden rounded-lg" :style="{ background: 'var(--c-surface-2)' }">
-      <img v-if="props.item.has_thumbnail" :src="thumbnailUrl(props.item.id)" alt="" class="h-full w-full object-cover" loading="lazy" />
+      <img v-if="props.item.has_thumbnail" :src="thumbnailUrl(props.item.id, { small: true })" alt="" class="h-full w-full object-cover" loading="lazy" />
       <div v-else class="flex h-full w-full items-center justify-center opacity-40">
         <Icon icon="music" />
       </div>
