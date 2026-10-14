@@ -1,0 +1,17 @@
+# CI 的 Python lint 门槛:只拦真正会出错的问题(语法错误、未定义的名字、
+# 未使用的导入/变量等)。规则集刻意保持精简——扩大范围前先把存量问题清掉,
+# 否则 CI 会一直红。
+target-version = "py312"
+extend-exclude = ["webui"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+# E722 裸 except / E741 单字母变量名 l:存量代码里有,属风格问题,暂不拦
+ignore = ["E722", "E741"]
+
+[lint.per-file-ignores]
+# 先定义 ReverseProxied 中间件再导入各 web_* 模块,顺序是有意的
+"interface.py" = ["E402"]
+# 副作用导入:导入即向 item_builders 注册条目类型 / 探测可选依赖是否可用
+"media/cache.py" = ["F401"]
+"commands/_shared.py" = ["F401"]

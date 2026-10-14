@@ -1,0 +1,52 @@
+# actions/labeler 配置:PR 改动了哪些路径就打哪些标签(由 pr-triage.yml 使用)。
+# 标签不存在时会自动创建;想改颜色 / 描述在仓库 Labels 页面里改即可。
+
+"area: webui":
+  - changed-files:
+      - any-glob-to-any-file: ["webui/**", "templates/**", "static/**"]
+
+"area: web-api":
+  - changed-files:
+      - any-glob-to-any-file: ["interface.py", "web_*.py"]
+
+"area: bot":
+  - changed-files:
+      - any-glob-to-any-file: ["bot/**", "mumbleBot.py", "variables.py", "constants.py", "util.py", "database.py"]
+
+"area: commands":
+  - changed-files:
+      - any-glob-to-any-file: ["commands/**"]
+
+"area: media":
+  - changed-files:
+      - any-glob-to-any-file: ["media/**", "playlist_import.py"]
+
+"area: i18n":
+  - changed-files:
+      - any-glob-to-any-file: ["lang/**", "webui/src/i18n/**"]
+
+"area: deploy":
+  - changed-files:
+      - any-glob-to-any-file:
+          - Dockerfile
+          - .dockerignore
+          - docker-compose.yml
+          - entrypoint.sh
+          - deploy/**
+          - "configuration*.ini"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: [".github/**", "ruff.toml", ".hadolint.yaml"]
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ["tests/**", "scripts/smoke_test.py"]
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: ["**/*.md"]
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file: ["requirements.txt", "webui/package.json", "webui/package-lock.json"]

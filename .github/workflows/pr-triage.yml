@@ -1,0 +1,62 @@
+# PR 分拣:按改动路径自动打标签,并检查标题符合 Conventional Commits
+# (仓库的提交历史本来就是 feat: / fix: / chore: ... 的写法)。
+#
+# 用 pull_request_target 是为了让 fork 来的 PR 也能被打标签;
+# 这里刻意不 checkout、不执行 PR 里的任何代码,标签配置从默认分支读取。
+name: PR triage
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Label by paths
+    # 只改标题 / 描述不影响改动路径,无需重新打标签
+    if: ${{ github.event.action != 'edited' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          sync-labels: true
+
+  title:
+    name: Conventional PR title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            build
+            ci
+            chore
+            style
+            revert
+          requireScope: false
+          # 标题主体不以大写字母开头,与提交历史风格一致
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            标题 "{subject}" 的描述部分不要以大写字母开头,
+            例如 "feat(webui): add queue drag-and-drop"。

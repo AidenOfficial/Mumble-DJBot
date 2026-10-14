@@ -1,7 +1,8 @@
 ARG ARCH=
 # 新版 Web UI(webui/)在独立 stage 里用 node 构建,产出 webui/dist。
 # 仓库里也提交了 dist,这个 stage 保证镜像总是带着与源码一致的最新构建。
-FROM node:22-slim AS webui-builder
+# 前端产物与 CPU 架构无关:固定在构建机原生平台上跑,多架构构建时不必在 QEMU 里跑 npm。
+FROM --platform=$BUILDPLATFORM node:22-slim AS webui-builder
 WORKDIR /webui
 COPY webui/package.json webui/package-lock.json ./
 RUN npm ci
@@ -21,14 +22,16 @@ RUN python3 -m venv venv \
     && venv/bin/pip install -r requirements.txt
 
 FROM python:3.12-slim-bookworm
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 EXPOSE 8181
-RUN apt update && \
-    apt install --no-install-recommends -y libopus0 opus-tools ffmpeg libmagic-dev curl tar unzip ca-certificates && \
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y libopus0 opus-tools ffmpeg libmagic-dev curl tar unzip ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Deno:spotdl 下载 YouTube 音频时用它破解 JS 校验,缺它 Spotify 播放会失败。
 # 装到 /usr/local/bin,确保任何进程都能在 PATH 找到。
+# pipefail:curl 失败时让构建直接失败,而不是把空脚本交给 sh。
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
 COPY --from=python-builder /botamusique /botamusique

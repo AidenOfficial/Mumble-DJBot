@@ -5,6 +5,7 @@
 
 <p>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+<a href="https://github.com/AidenOfficial/Mumble-DJBot/actions/workflows/ci.yml"><img src="https://github.com/AidenOfficial/Mumble-DJBot/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI" /></a>
 <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12" />
 <img src="https://img.shields.io/badge/deploy-Docker-2496ED.svg" alt="Docker" />
 </p>
@@ -242,6 +243,22 @@ npm run build   # 生产构建输出至 webui/dist
 ### 冒烟测试
 
 `scripts/smoke_test.py` 可在不连接 Mumble 的情况下，检查运行环境以及 Bilibili、Spotify 的下载链路，详见 [`deploy/VERIFY.md`](deploy/VERIFY.md)。
+
+### 持续集成
+
+GitHub Actions 工作流位于 `.github/workflows/`：
+
+| 工作流 | 触发 | 内容 |
+|---|---|---|
+| `ci.yml` | 推送到 `master`、PR、每周 | Ruff、ShellCheck、Hadolint、actionlint；在 Python 3.12 与 3.13 上运行测试；构建 Web 界面，并检查提交的 `webui/dist` 与源码一致；构建 Docker 镜像并运行离线冒烟测试。分支保护只需要求 `CI OK` 这一项检查。 |
+| `docker-publish.yml` | 推送到 `master`、`v*` tag | 构建 `linux/amd64` 与 `linux/arm64` 镜像并推送到 `ghcr.io/aidenofficial/mumble-djbot`（`master` 对应 `edge`；发版 tag 对应 `X.Y.Z`、`X.Y` 与 `latest`），附带 SBOM 和构建来源证明，随后用 Trivy 扫描。改动镜像相关文件的 PR 只构建、不推送。 |
+| `release.yml` | `v*` tag | 创建 GitHub Release，更新说明按 PR 标签分类。 |
+| `codeql.yml` | 推送、PR、每周 | 对 Python、TypeScript 和工作流代码做 CodeQL 分析。 |
+| `dependency-review.yml` | PR | 拦截新增的含高危漏洞或 AGPL/SSPL 许可证的依赖。 |
+| `pr-triage.yml` | PR | 按改动路径给 PR 打标签，并检查标题是否符合 Conventional Commits。 |
+| `stale.yml` | 每天 | 标记并关闭长期无动静的 issue 与 PR。 |
+
+Dependabot（`.github/dependabot.yml`）负责更新锁定的 Actions 版本和 Web 界面的 npm 依赖。发版时推送形如 `v1.2.3` 的 tag 即可。
 
 ### 项目结构
 

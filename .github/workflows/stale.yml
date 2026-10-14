@@ -1,0 +1,40 @@
+# 长期无动静的 issue / PR 先标记 stale,再无回应则关闭。
+# 带 pinned / security / help wanted 标签、或有负责人的不处理。
+name: Stale
+
+on:
+  schedule:
+    - cron: "23 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    name: Mark & close stale
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-issue-stale: 60
+          days-before-pr-stale: 30
+          days-before-close: 14
+          stale-issue-label: stale
+          stale-pr-label: stale
+          exempt-issue-labels: pinned,security,help wanted
+          exempt-pr-labels: pinned,security
+          exempt-all-assignees: true
+          exempt-draft-pr: true
+          stale-issue-message: >-
+            This issue has had no activity for 60 days and will be closed in 14 days
+            unless there is new activity. 这个 issue 已 60 天无动静,14 天内仍无回复将自动关闭。
+          stale-pr-message: >-
+            This pull request has had no activity for 30 days and will be closed in 14 days
+            unless there is new activity. 这个 PR 已 30 天无动静,14 天内仍无更新将自动关闭。
+          close-issue-reason: not_planned
+          operations-per-run: 60

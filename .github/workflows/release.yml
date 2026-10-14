@@ -1,0 +1,49 @@
+# 推送 v* tag 时自动创建 GitHub Release,发布说明按 PR 标签分类生成
+# (分类规则见 .github/release.yml)。镜像由 docker-publish.yml 同时构建推送。
+#
+# 发版:git tag v1.2.3 && git push origin v1.2.3
+# 预发布:tag 带后缀,如 v1.3.0-rc.1(Release 标记为 pre-release,不会更新 :latest 镜像)
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${TAG#v}"
+          prerelease=()
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          notes=$(printf '%s\n' \
+            '## Docker' \
+            '' \
+            '```bash' \
+            "docker pull ${image}:${version}" \
+            '```' \
+            '' \
+            "验证镜像来源:\`gh attestation verify oci://${image}:${version} --repo ${GITHUB_REPOSITORY}\`")
+          # --notes 的内容会放在自动生成的更新说明前面
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$TAG" \
+            --generate-notes \
+            --notes "$notes" \
+            "${prerelease[@]}"
