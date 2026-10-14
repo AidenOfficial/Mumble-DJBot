@@ -50,6 +50,7 @@ class FileItem(BaseItem):
             self.artist = ""
             self.thumbnail = None
             self.artwork = ""  # 高清封面来源,见 media/artwork.py
+            self.artwork_done = False
             self.id = hashlib.md5(path.encode()).hexdigest()
             if os.path.exists(self.uri()):
                 self._get_info_from_tag()
@@ -61,6 +62,7 @@ class FileItem(BaseItem):
             self.artist = from_dict['artist']
             self.thumbnail = from_dict['thumbnail']
             self.artwork = from_dict.get('artwork', '')
+            self.artwork_done = from_dict.get('artwork_done', False)
             try:
                 self.validate()
             except ValidationFailedError:
@@ -180,6 +182,7 @@ class FileItem(BaseItem):
         dict['artist'] = self.artist
         dict['thumbnail'] = self.thumbnail
         dict['artwork'] = self.artwork
+        dict['artwork_done'] = self.artwork_done
         return dict
 
     def format_debug_string(self):

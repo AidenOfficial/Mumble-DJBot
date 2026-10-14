@@ -54,6 +54,7 @@ class URLItem(BaseItem):
             self.thumbnail = ""
             self.keywords = ""
             self.artwork = ""
+            self.artwork_done = False  # 曲库查过了(不管查没查到)
             self.artist = ""
             self.album = ""
         else:
@@ -65,6 +66,7 @@ class URLItem(BaseItem):
             self.thumbnail = from_dict['thumbnail']
             # 高清封面来源(见 media/artwork.py)和匹配到的歌手/专辑;旧记录没有
             self.artwork = from_dict.get('artwork', '')
+            self.artwork_done = from_dict.get('artwork_done', False)
             self.artist = from_dict.get('artist', '')
             self.album = from_dict.get('album', '')
 
@@ -508,6 +510,7 @@ class URLItem(BaseItem):
         dict['title'] = self.title
         dict['thumbnail'] = self.thumbnail
         dict['artwork'] = self.artwork
+        dict['artwork_done'] = self.artwork_done
         dict['artist'] = self.artist
         dict['album'] = self.album
 
