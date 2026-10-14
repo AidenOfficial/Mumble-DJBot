@@ -254,7 +254,7 @@ GitHub Actions workflows live in `.github/workflows/`:
 | Workflow | Runs on | What it does |
 |---|---|---|
 | `ci.yml` | push to `master`, pull requests, weekly | Ruff, ShellCheck, Hadolint and actionlint; the test suite on Python 3.12 and 3.13; the web interface build, including a check that the committed `webui/dist` matches the source; a Docker image build with an offline smoke test. The `CI OK` job is the single check to require in branch protection. |
-| `docker-publish.yml` | push to `master`, `v*` tags | Builds `linux/amd64` and `linux/arm64` images and pushes them to `ghcr.io/aidenofficial/mumble-djbot` (`edge` for `master`; `X.Y.Z`, `X.Y` and `latest` for release tags) with an SBOM and a build provenance attestation, then scans the image with Trivy. Pull requests that touch the image only build it. |
+| `docker-publish.yml` | push to `master`, `v*` tags | Builds `linux/amd64` and `linux/arm64` images in parallel on native x86 / arm runners and pushes them to `ghcr.io/aidenofficial/mumble-djbot` (`edge` for `master`; `X.Y.Z`, `X.Y` and `latest` for release tags) with an SBOM and a build provenance attestation, then scans the image with Trivy. Pull requests that touch the image only build it. |
 | `release.yml` | `v*` tags | Creates a GitHub release with notes grouped by pull request label. |
 | `codeql.yml` | push, pull requests, weekly | CodeQL analysis of the Python, TypeScript and workflow code. |
 | `dependency-review.yml` | pull requests | Blocks newly added dependencies with high-severity advisories or AGPL/SSPL licenses. |

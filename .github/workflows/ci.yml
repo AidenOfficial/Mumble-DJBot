@@ -170,6 +170,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Dependency refresh key
+        id: deps
+        # 见 Dockerfile 的 DEPS_REFRESH:每天重装一次 pip 层,
+        # 否则每周定时跑也只会测到缓存里的旧 yt-dlp / spotdl,发现不了上游的不兼容
+        run: echo "key=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build image
@@ -182,7 +188,11 @@ jobs:
           tags: mumble-music:ci
           # 只在本机 load 做冒烟,不需要证明;docker exporter 也不支持 attestation
           provenance: false
-          cache-from: type=gha,scope=ci-amd64
+          build-args: DEPS_REFRESH=${{ steps.deps.outputs.key }}
+          # Dockerfile 相同,Docker publish 的 amd64 缓存也能直接命中
+          cache-from: |
+            type=gha,scope=ci-amd64
+            type=gha,scope=publish-amd64
           cache-to: type=gha,scope=ci-amd64,mode=max
 
       - name: Smoke test (tools + imports, offline)
