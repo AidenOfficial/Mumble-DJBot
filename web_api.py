@@ -43,6 +43,8 @@ def _item_summary(wrapper, index):
         # 封面来源(album / video / embedded / ''),变了说明高清图换了,前端据此刷新图片
         'artwork': getattr(item, 'artwork', '') or '',
         'album': getattr(item, 'album', '') or '',
+        # 匹配到专辑时曲库里的正式歌名(没有就是 ''),播放页用它代替视频标题
+        'track': getattr(item, 'track', '') or '',
         # 点歌人:网页点的是 Web 显示名,聊天点的绑定了就换成 Web 显示名、否则是 Mumble 名
         'requester': requester_display_name(getattr(wrapper, 'user', '') or ''),
     }

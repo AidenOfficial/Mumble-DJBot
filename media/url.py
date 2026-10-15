@@ -55,6 +55,7 @@ class URLItem(BaseItem):
             self.artwork_done = False  # 曲库查过了(不管查没查到)
             self.artist = ""
             self.album = ""
+            self.track = None  # 曲库里的正式歌名;None = 还没查过,'' = 查过但没匹配到
         else:
             super().__init__(from_dict)
             self.url = from_dict['url']
@@ -67,6 +68,7 @@ class URLItem(BaseItem):
             self.artwork_done = from_dict.get('artwork_done', False)
             self.artist = from_dict.get('artist', '')
             self.album = from_dict.get('album', '')
+            self.track = from_dict.get('track')
 
         self.downloading = False
         # Fraction in [0.0, 1.0] of the current download, updated by the
@@ -511,6 +513,7 @@ class URLItem(BaseItem):
         dict['artwork_done'] = self.artwork_done
         dict['artist'] = self.artist
         dict['album'] = self.album
+        dict['track'] = self.track
 
         return dict
 
