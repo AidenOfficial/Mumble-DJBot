@@ -16,10 +16,15 @@ WORKDIR /botamusique
 RUN apt-get update \
     && apt-get install --no-install-recommends -y gcc g++ git ca-certificates ffmpeg libjpeg-dev libmagic-dev opus-tools zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
-COPY . /botamusique
+# 只拷 requirements.txt:改业务代码不会让下面最慢的 pip 层失效。
+COPY requirements.txt /botamusique/
+# requirements.txt 没锁版本,层缓存会把 yt-dlp / spotdl 冻结在上次装的版本。
+# CI 每天传入不同的 DEPS_REFRESH(当天日期)让这一层每天重装一次;本地构建不传则一直复用缓存。
+# 后面的 RUN 会隐式读取作用域内的 ARG,值变了即缓存失效。
+ARG DEPS_REFRESH=
 RUN python3 -m venv venv \
-    && venv/bin/pip install wheel \
-    && venv/bin/pip install -r requirements.txt
+    && venv/bin/pip install --no-cache-dir wheel \
+    && venv/bin/pip install --no-cache-dir -r requirements.txt
 
 FROM python:3.12-slim-bookworm
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,7 +39,10 @@ RUN apt-get update && \
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
-COPY --from=python-builder /botamusique /botamusique
+# venv 和源码分两层:只改代码时体积最大的 venv 层不变,推送 / 拉取 / 缓存导出都只走源码这一小层。
+# venv 必须放在构建时的同一路径,里面脚本的 shebang 写死了 /botamusique/venv。
+COPY --from=python-builder /botamusique/venv /botamusique/venv
+COPY . /botamusique
 COPY --from=webui-builder /webui/dist /botamusique/webui/dist
 WORKDIR /botamusique
 # 修掉可能存在的 Windows CRLF 换行(否则容器内会报 bad interpreter),再赋可执行权限。

@@ -3,6 +3,7 @@
 #   push tag v1.2.3  → :1.2.3、:1.2、:latest、:sha-<短 commit>
 # 每个镜像附带 SBOM + 构建来源证明(provenance),推送后用 Trivy 扫描漏洞,
 # 结果进仓库 Security → Code scanning。
+# 两个架构分别在 x86 / arm 原生 runner 上并行构建,不走 QEMU 模拟。
 # 改动镜像相关文件的 PR 只做双架构构建验证(不登录、不推送),
 # 避免 arm64 构建问题合并后才在发布时暴露。
 name: Docker publish
@@ -33,18 +34,27 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # 每个架构在对应的原生 runner 上构建(公开仓库的 ubuntu-24.04-arm 免费),
+  # 不再用 QEMU 模拟 arm64:模拟下 pip 编译依赖要 3~4 分钟,原生只要几十秒。
+  # 各架构按 digest 推送(不打 tag),由 merge job 合成多架构 manifest 再打 tag。
   build:
-    name: Build & push
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write # 推送到 GHCR
-      id-token: write # 签发构建来源证明
-      attestations: write
-    outputs:
-      image: ${{ steps.image.outputs.name }}
-      digest: ${{ steps.build.outputs.digest }}
+    strategy:
+      # PR 上两个架构的结果都要看到,不因一个失败就取消另一个
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,9 +65,10 @@ jobs:
         # GHCR 要求小写,而仓库名 AidenOfficial/Mumble-DJBot 含大写
         run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          platforms: arm64
+      - name: Dependency refresh key
+        id: deps
+        # 见 Dockerfile 的 DEPS_REFRESH:每天让 pip 层重装一次,yt-dlp / spotdl 不会被缓存冻结
+        run: echo "key=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -70,6 +81,7 @@ jobs:
 
       - name: Image metadata
         id: meta
+        # 这里不推 tag,但 tags 配置要与 merge job 一致:version 等 label 是从 tag 推出来的
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ steps.image.outputs.name }}
@@ -85,34 +97,128 @@ jobs:
             org.opencontainers.image.title=Mumble DJBot
             org.opencontainers.image.description=Mumble music bot with a web UI
 
-      - name: Build & push
+      - name: Build & push by digest
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: DEPS_REFRESH=${{ steps.deps.outputs.key }}
+          # PR 上只构建不推送
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=publish
-          cache-to: type=gha,scope=publish,mode=max
+          cache-from: type=gha,scope=publish-${{ matrix.arch }}
+          cache-to: type=gha,scope=publish-${{ matrix.arch }},mode=max
+
+      - name: Export digest
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # 把各架构的 digest 合成一个多架构 manifest list,打 tag、签来源证明
+  merge:
+    name: Merge & tag
+    needs: build
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write # 推送 manifest list
+      id-token: write # 签发构建来源证明
+      attestations: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Image name (lowercase)
+        id: image
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # 注解由 labels 生成;各架构 manifest 上的已在 build job 里加过,这里只给 manifest list 加
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=edge,branch=master
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+          # latest 只跟正式版 tag 走(semver 且非预发布),master 上的提交只更新 edge
+          flavor: |
+            latest=auto
+          labels: |
+            org.opencontainers.image.title=Mumble DJBot
+            org.opencontainers.image.description=Mumble music bot with a web UI
+
+      - name: Create & push manifest list
+        id: push
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then args+=(--tag "$tag"); fi
+          done <<< "$DOCKER_METADATA_OUTPUT_TAGS"
+          while IFS= read -r annotation; do
+            if [ -n "$annotation" ]; then args+=(--annotation "$annotation"); fi
+          done <<< "$DOCKER_METADATA_OUTPUT_ANNOTATIONS"
+          sources=()
+          for digest in *; do
+            sources+=("${IMAGE}@sha256:${digest}")
+          done
+          docker buildx imagetools create "${args[@]}" "${sources[@]}"
+          # 取第一个 tag 查合成后 manifest list 的 digest,供来源证明和 Trivy 用
+          first_tag="$(head -n1 <<< "$DOCKER_METADATA_OUTPUT_TAGS")"
+          digest="$(docker buildx imagetools inspect "$first_tag" --format '{{json .Manifest}}' | jq -r .digest)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.image.outputs.name }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
       - name: Summary
-        if: ${{ github.event_name != 'pull_request' }}
         env:
           IMAGE: ${{ steps.image.outputs.name }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.push.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {
@@ -128,7 +234,7 @@ jobs:
   # 扫描单独成 job:只给读权限,第三方扫描器拿不到推送 / 签名用的 token
   scan:
     name: Trivy scan
-    needs: build
+    needs: merge
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -144,7 +250,7 @@ jobs:
           TRIVY_USERNAME: ${{ github.actor }}
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         with:
-          image-ref: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
+          image-ref: ${{ needs.merge.outputs.image }}@${{ needs.merge.outputs.digest }}
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH

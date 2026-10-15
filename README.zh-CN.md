@@ -253,7 +253,7 @@ GitHub Actions 工作流位于 `.github/workflows/`：
 | 工作流 | 触发 | 内容 |
 |---|---|---|
 | `ci.yml` | 推送到 `master`、PR、每周 | Ruff、ShellCheck、Hadolint、actionlint；在 Python 3.12 与 3.13 上运行测试；构建 Web 界面，并检查提交的 `webui/dist` 与源码一致；构建 Docker 镜像并运行离线冒烟测试。分支保护只需要求 `CI OK` 这一项检查。 |
-| `docker-publish.yml` | 推送到 `master`、`v*` tag | 构建 `linux/amd64` 与 `linux/arm64` 镜像并推送到 `ghcr.io/aidenofficial/mumble-djbot`（`master` 对应 `edge`；发版 tag 对应 `X.Y.Z`、`X.Y` 与 `latest`），附带 SBOM 和构建来源证明，随后用 Trivy 扫描。改动镜像相关文件的 PR 只构建、不推送。 |
+| `docker-publish.yml` | 推送到 `master`、`v*` tag | 在 x86 / arm 原生 runner 上并行构建 `linux/amd64` 与 `linux/arm64` 镜像并推送到 `ghcr.io/aidenofficial/mumble-djbot`（`master` 对应 `edge`；发版 tag 对应 `X.Y.Z`、`X.Y` 与 `latest`），附带 SBOM 和构建来源证明，随后用 Trivy 扫描。改动镜像相关文件的 PR 只构建、不推送。 |
 | `release.yml` | `v*` tag | 创建 GitHub Release，更新说明按 PR 标签分类。 |
 | `codeql.yml` | 推送、PR、每周 | 对 Python、TypeScript 和工作流代码做 CodeQL 分析。 |
 | `dependency-review.yml` | PR | 拦截新增的含高危漏洞或 AGPL/SSPL 许可证的依赖。 |
