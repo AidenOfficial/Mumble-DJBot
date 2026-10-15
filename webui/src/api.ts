@@ -12,6 +12,8 @@ export interface CurrentItem {
   /** 高清封面来源:album(专辑封面)/ video(视频封面)/ embedded(文件内嵌)/ ''(还没准备好) */
   artwork: string
   album: string
+  /** 曲库里的正式歌名(匹配到专辑封面时才有),视频标题里的歌手/MV 标注都去掉了 */
+  track: string
   /** 点歌人:网页点的是 Web 昵称(没有就邮箱前缀 / Guest),聊天点的绑定了是 Web 昵称、否则是 Mumble 名 */
   requester: string
   /** SponsorBlock 会跳过的片段 [开始, 结束](秒),只有当前曲有 */

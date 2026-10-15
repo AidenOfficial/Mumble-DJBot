@@ -616,7 +616,11 @@ def lookup_enabled():
 
 def _done(item):
     """曲库已经查过(查到/没查到都算)。上一版没有 artwork_done 字段:
-    专辑/内嵌封面就算查过了,视频封面的再按新规则查一次。"""
+    专辑/内嵌封面就算查过了,视频封面的再按新规则查一次。
+    更早的专辑封面条目没存正式歌名(track 是 None):再查一次补上。"""
+    if getattr(item, 'type', '') in URL_TYPES and getattr(item, 'artwork', '') == 'album' \
+            and getattr(item, 'track', '') is None:
+        return False
     return bool(getattr(item, 'artwork_done', False)) or getattr(item, 'artwork', '') in ('album', 'embedded')
 
 
@@ -704,6 +708,8 @@ def _apply(item, im, state, match=None):
         if match:
             item.artist = ', '.join(a for a in match.get('artists') or [] if a)
             item.album = match.get('album') or ''
+            if item.type in URL_TYPES:
+                item.track = match.get('title') or ''
         item.version += 1  # 通知 wrapper 存库
     log.info("artwork: %s cover for %s%s", state, item.format_title(),
              f" ({match['source']}: {', '.join(match['artists'])} - {match['title']})" if match else '')
@@ -769,6 +775,8 @@ def resolve(item, info=None, providers=None):
         _video_step(item, info)  # 查不到专辑封面:用视频封面
     if not has_hd(item.id):
         item.artwork = 'none'
+    if getattr(item, 'track', '') is None:
+        item.track = ''  # 查过了,没有正式歌名,别再为它重查
     item.artwork_done = True
     item.version += 1
 

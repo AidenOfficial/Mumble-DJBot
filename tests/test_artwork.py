@@ -266,6 +266,7 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual('album', item.artwork)
         self.assertEqual('米津玄師', item.artist)
         self.assertEqual('Lemon', item.album)
+        self.assertEqual('Lemon', item.track)
         self.assertEqual(['http://img/album.jpg'], self.fetched)
         self.assertTrue(artwork.has_hd(item.id))
         self.assertTrue(item.thumbnail)
@@ -341,6 +342,22 @@ class ResolveTest(unittest.TestCase):
         self.assertIn(item.id, artwork._queued)
         with artwork._lock:
             artwork._queued.discard(item.id)
+
+    def test_old_album_item_without_track_is_looked_up_again(self):
+        # 上一版的专辑封面条目没存正式歌名:再查一次补上
+        item = FakeURLItem()
+        item.artwork, item.artwork_done, item.track = 'album', True, None
+        with open(artwork.path_for(item.id), 'wb') as f:
+            f.write(b'x')
+        artwork.ensure(item)
+        self.assertIn(item.id, artwork._queued)
+        with artwork._lock:
+            artwork._queued.discard(item.id)
+        # 这次没查到也记下来,不会每次显示都重查
+        artwork.resolve(item, {'title': item.title, 'uploader': 'x'}, providers=[lambda q: []])
+        self.assertEqual('', item.track)
+        artwork.ensure(item)
+        self.assertNotIn(item.id, artwork._queued)
 
     def test_prune_removes_oldest(self):
         var.config.set('bot', 'artwork_folder_max_size', '1')

@@ -110,6 +110,14 @@ const skipBlocks = computed(() => {
   }))
 })
 
+// 匹配到专辑时标题用曲库的正式歌名,完整的视频标题放到悬停提示里
+const displayTitle = computed(() => current.value?.track || current.value?.title || '')
+// 单曲的专辑名常常就是歌名:和标题重复时不再显示
+const showAlbum = computed(() => {
+  const album = current.value?.album?.trim().toLowerCase()
+  return !!album && album !== displayTitle.value.trim().toLowerCase()
+})
+
 const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
 </script>
 
@@ -157,7 +165,7 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
           <p class="max-w-full truncate text-xs" :style="{ color: 'var(--c-text-faint)' }">{{ current.title }}</p>
         </template>
         <h1 v-else class="max-w-full truncate text-xl font-semibold sm:text-2xl" :title="current.title">
-          {{ current.title || t('common.untitled') }}
+          {{ displayTitle || t('common.untitled') }}
         </h1>
         <p class="flex items-center gap-2 text-sm" :style="{ color: 'var(--c-text-muted)' }">
           <span
@@ -165,7 +173,7 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
             :style="{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }"
           >{{ sourceLabel }}</span>
           <span v-if="current.artist && current.artist !== '??'">{{ current.artist }}</span>
-          <span v-if="current.album" class="hidden max-w-48 truncate sm:inline" :title="current.album">· {{ current.album }}</span>
+          <span v-if="showAlbum" class="hidden max-w-48 truncate sm:inline" :title="current.album">· {{ current.album }}</span>
           <span
             v-if="current.requester"
             class="max-w-40 truncate text-xs"
