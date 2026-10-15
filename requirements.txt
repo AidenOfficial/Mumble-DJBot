@@ -10,6 +10,6 @@ PyJWT[crypto]
 opencc-python-reimplemented
 # Mumble 客户端库:我们自己维护的 pymumble-rev(https://github.com/AidenOfficial/PyMumble),
 # 取代了 pymumble。锁定到 commit,升级时改这里。运行时需要系统的 libopus(Docker 镜像里已装)。
-pymumble-rev @ git+https://github.com/AidenOfficial/PyMumble.git@6651970107801f3f594b3109a93221321d0eb4e9
+pymumble-rev @ git+https://github.com/AidenOfficial/PyMumble.git@bb57860653b14ef0c7ee4283fe64edcecf2ac0bd
 pyradios
 spotdl
