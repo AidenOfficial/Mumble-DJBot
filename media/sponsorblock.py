@@ -21,6 +21,8 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 
+import variables as var
+
 log = logging.getLogger("bot")
 
 SERVERS = {
@@ -74,6 +76,14 @@ def video_ref(url):
         if m:
             return ('bilibili', av_to_bv(m.group(1)), part)
     return None
+
+
+def configured_categories():
+    """配置里要跳过的片段类别;没开 SponsorBlock 时返回 []。"""
+    if var.config is None or not var.config.getboolean('bot', 'sponsorblock', fallback=False):
+        return []
+    raw = var.config.get('bot', 'sponsorblock_categories', fallback='music_offtopic')
+    return [c.strip() for c in raw.split(',') if c.strip()]
 
 
 def merge_segments(segments):

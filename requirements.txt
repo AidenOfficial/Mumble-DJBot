@@ -12,4 +12,7 @@ opencc-python-reimplemented
 # 取代了 pymumble。锁定到 commit,升级时改这里。运行时需要系统的 libopus(Docker 镜像里已装)。
 pymumble-rev @ git+https://github.com/AidenOfficial/PyMumble.git@bb57860653b14ef0c7ee4283fe64edcecf2ac0bd
 pyradios
+# 听歌识曲(Shazam)的音频指纹,Rust 实现,amd64/arm64 都有 abi3 轮子。
+# 只用它算指纹,请求自己发(不装 shazamio:它会带上 numpy/pydub/aiohttp)。2.x 刚发布,接口变了再放开
+shazamio-core>=1.1.2,<2
 spotdl

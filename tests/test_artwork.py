@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import variables as var  # noqa: E402
-from media import artwork  # noqa: E402
+from media import artwork, recognize  # noqa: E402
 from media.artwork import Candidate  # noqa: E402
 
 
@@ -207,6 +207,119 @@ class FindAlbumTest(unittest.TestCase):
         self.assertLessEqual(len(self.queries), artwork.MAX_CALLS_PER_ITEM)
 
 
+def card(title, artist, album=''):
+    return {'title': title, 'artist': artist, 'album': album}
+
+
+class MusicCandidateTest(unittest.TestCase):
+    """YouTube「Music」卡片的校验,用例都是实测到的卡片。"""
+    def pick(self, cards, title, extra=''):
+        return artwork.music_candidate(cards, title, artwork.words(title + ' ' + extra))
+
+    def test_matching_card_is_used(self):
+        self.assertEqual(Candidate('Lemon', 'Kenshi Yonezu'),
+                         self.pick([card('Lemon', 'Kenshi Yonezu', 'Lemon')], '米津玄師  Kenshi Yonezu  - Lemon'))
+
+    def test_translated_title_trusts_card(self):
+        # 英文标题,卡片给的是原名
+        c = self.pick([card('打上花火', 'DAOKO×米津玄師')], 'DAOKO × Kenshi Yonezu “Fireworks” MUSIC VIDEO')
+        self.assertEqual(Candidate('打上花火', 'DAOKO×米津玄師'), c)
+
+    def test_version_label_from_card_dropped(self):
+        c = self.pick([card('Perfect Duet (with Beyoncé)', 'Ed Sheeran')], 'Ed Sheeran - Perfect (Official Music Video)')
+        self.assertEqual('Perfect', c.track)
+        c = self.pick([card('踊り子 (DOME TOUR 2026 "SILENCE")', 'Vaundy')],
+                      '【第75回NHK紅白歌合戦 歌唱曲】踊り子 / Vaundy：MUSIC VIDEO')
+        self.assertEqual('踊り子', c.track)
+
+    def test_card_shorter_than_title_guess(self):
+        c = self.pick([card('Pale Blue', 'Kenshi Yonezu')], '米津玄師  - Pale Blue / Kenshi Yonezu')
+        self.assertEqual(Candidate('Pale Blue', 'Kenshi Yonezu'), c)
+
+    def test_wrong_song_rejected(self):
+        # Content ID 配成了别人的同名歌
+        self.assertIsNone(self.pick([card('O Amante', 'Thiago Matheus', 'Fénix')], 'El Amante - Nicky Jam | Video Oficial'))
+        # 歌手对得上,但标题里写的是另一首
+        self.assertIsNone(self.pick([card('Shape of You', 'Ed Sheeran')], 'Ed Sheeran - Perfect (Official Music Video)'))
+
+    def test_several_cards_rejected(self):
+        cards = [card('Shape of You', 'Ed Sheeran'), card('Night Changes', 'One Direction')]
+        self.assertIsNone(self.pick(cards, 'Señorita - Shawn Mendes [Lyrics] | Ed Sheeran, One Direction'))
+
+    def test_card_mirroring_video_title_rejected(self):
+        self.assertIsNone(self.pick([card('YOASOBI - 群青  / THE FIRST TAKE', 'YOASOBI')],
+                                    'YOASOBI - Gunjo / THE FIRST TAKE'))
+        self.assertIsNone(self.pick([card('Alan Walker - Faded', '')], 'Alan Walker - Faded'))
+
+    def test_artist_from_uploader_counts(self):
+        c = self.pick([card('Pretender', 'Official髭男dism')], 'OFFICIAL HIGE DANDISM - Pretender［Official Video］',
+                      extra='Official髭男dism')
+        self.assertEqual(Candidate('Pretender', 'Official髭男dism'), c)
+        self.assertIsNone(self.pick([card('Pretender', 'Official髭男dism')],
+                                    'OFFICIAL HIGE DANDISM - Pretender［Official Video］'))
+
+
+# next 接口返回里「Music」区块的实际结构(删掉了无关字段)
+NEXT_RESPONSE = {'engagementPanels': [
+    {'engagementPanelSectionListRenderer': {'content': {'sectionListRenderer': {}}}},
+    {'engagementPanelSectionListRenderer': {'content': {'structuredDescriptionContentRenderer': {'items': [
+        {'videoDescriptionHeaderRenderer': {}},
+        {'horizontalCardListRenderer': {
+            'cards': [{'videoAttributeViewModel': {'title': 'Other', 'subtitle': 'x'}}],
+            'header': {'richListHeaderRenderer': {'title': {'simpleText': 'People mentioned'}}},
+            'footerButton': {'buttonViewModel': {'iconName': 'PERSON'}}}},
+        {'horizontalCardListRenderer': {
+            'cards': [{'videoAttributeViewModel': {
+                'title': 'Lemon', 'subtitle': 'Kenshi Yonezu', 'secondarySubtitle': {'content': 'Lemon'}}}],
+            'header': {'richListHeaderRenderer': {'title': {'simpleText': '音乐'},
+                                                  'subtitle': {'simpleText': '1 song'}}},
+            'footerButton': {'buttonViewModel': {'iconName': 'MUSIC'}}}},
+    ]}}}},
+]}
+
+# Shazam 返回的实际结构(删掉了无关字段)
+SHAZAM_RESPONSE = {
+    'matches': [{'id': '1', 'offset': 61.2}],
+    'track': {
+        'title': 'Lemon', 'subtitle': '米津玄师',
+        'images': {'coverart': 'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/x/dj.jpg/400x400cc.jpg',
+                   'coverarthq': 'https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/x/dj.jpg/400x400cc.jpg'},
+        'sections': [{'type': 'SONG', 'metadata': [{'title': '专辑', 'text': 'STRAY SHEEP'},
+                                                    {'title': '唱片公司', 'text': 'Sony Music Labels Inc.'}]},
+                     {'type': 'RELATED'}],
+    },
+}
+
+
+class RecognizeParseTest(unittest.TestCase):
+    def test_music_section(self):
+        self.assertEqual([card('Lemon', 'Kenshi Yonezu', 'Lemon')], recognize.parse_music_section(NEXT_RESPONSE))
+        self.assertEqual([], recognize.parse_music_section({}))
+        self.assertEqual([], recognize.parse_music_section(None))
+
+    def test_not_youtube_skips_request(self):
+        self.assertEqual([], recognize.youtube_music('https://www.bilibili.com/video/BV1xx411c7mD'))
+
+    def test_shazam_response(self):
+        m = recognize.parse_shazam(SHAZAM_RESPONSE)
+        self.assertEqual(('Lemon', ['米津玄师'], 'STRAY SHEEP', 'shazam'),
+                         (m['title'], m['artists'], m['album'], m['source']))
+        self.assertTrue(m['image'].endswith('/1000x1000cc.jpg'))
+        self.assertIsNone(recognize.parse_shazam({'matches': [], 'tagid': 'x'}))
+
+    def test_clip_offsets(self):
+        self.assertEqual([70.0, 130.0], recognize.clip_offsets(200))
+        # 35% 处落在要跳过的片段里:挪到最近的音乐部分(片段前面那段)
+        self.assertEqual([48.0, 130.0], recognize.clip_offsets(200, [(60, 90)]))
+        self.assertEqual([90.0, 130.0], recognize.clip_offsets(200, [(40, 90)]))
+        # 整首都是要跳过的片段:不认
+        self.assertEqual([], recognize.clip_offsets(200, [(0, 200)]))
+        self.assertEqual([0.0], recognize.clip_offsets(8))
+        self.assertEqual([30.0], recognize.clip_offsets(0))
+        # 剩下的音乐不够两段:只截一段
+        self.assertEqual([100.0], recognize.clip_offsets(200, [(0, 100), (112, 200)]))
+
+
 class FakeURLItem:
     type = 'url'
 
@@ -219,6 +332,11 @@ class FakeURLItem:
         self.artwork = ''
         self.artist = ''
         self.album = ''
+        self.track = None
+        self.shazam = ''
+        self.ready = 'validated'
+        self.downloading = False
+        self.path = ''
         self.version = 0
 
     def format_title(self):
@@ -251,10 +369,25 @@ class ResolveTest(unittest.TestCase):
             self.extracted.append(url)
             return {}
         artwork._extract_info = fake_extract
+        # 「Music」卡片和 Shazam 都不联网
+        self.cards, self.card_lookups = [], []
+        self.heard, self.shazam_calls = None, []
+        self._recognize = (recognize.youtube_music, recognize.shazam)
+
+        def fake_cards(url):
+            self.card_lookups.append(url)
+            return self.cards
+        recognize.youtube_music = fake_cards
+
+        def fake_shazam(path, duration=0, url=''):
+            self.shazam_calls.append(path)
+            return self.heard
+        recognize.shazam = fake_shazam
 
     def tearDown(self):
         artwork._fetch_image = self._fetch
         artwork._extract_info = self._extract
+        recognize.youtube_music, recognize.shazam = self._recognize
         var.config, var.tmp_folder = self._saved
         self.tmp.cleanup()
 
@@ -356,6 +489,138 @@ class ResolveTest(unittest.TestCase):
         # 这次没查到也记下来,不会每次显示都重查
         artwork.resolve(item, {'title': item.title, 'uploader': 'x'}, providers=[lambda q: []])
         self.assertEqual('', item.track)
+        artwork.ensure(item)
+        self.assertNotIn(item.id, artwork._queued)
+
+    def audio(self, item):
+        item.path = os.path.join(self.tmp.name, item.id)
+        with open(item.path, 'wb') as f:
+            f.write(b'audio')
+        item.ready = 'yes'
+
+    def test_music_card_drives_lookup(self):
+        item = FakeURLItem()
+        item.title = 'DAOKO × Kenshi Yonezu “Fireworks” MUSIC VIDEO'
+        self.cards = [card('打上花火', 'DAOKO×米津玄師', '打上花火')]
+        queries = []
+
+        def provider(q):
+            queries.append(q)
+            return [song('打上花火', ['DAOKO', '米津玄師'], 290)] if '打上花火' in q else []
+        artwork.resolve(item, {'title': item.title, 'uploader': 'DAOKO', 'duration': 290}, providers=[provider])
+        self.assertEqual('打上花火', queries[0])
+        self.assertEqual(('album', '打上花火', 'DAOKO, 米津玄師'), (item.artwork, item.track, item.artist))
+        self.assertEqual('', item.shazam)
+
+    def test_music_card_name_kept_without_catalog_match(self):
+        item = FakeURLItem()
+        item.title = 'DAOKO × Kenshi Yonezu “Fireworks” MUSIC VIDEO'
+        self.cards = [card('打上花火', 'DAOKO×米津玄師', '打上花火')]
+        artwork.resolve(item, {'title': item.title, 'thumbnail': 'http://video.jpg'}, providers=[lambda q: []])
+        self.assertEqual(('video', '打上花火', 'DAOKO×米津玄師', '打上花火'),
+                         (item.artwork, item.track, item.artist, item.album))
+        self.assertEqual('pending', item.shazam)
+
+    def test_covers_skip_card_and_shazam(self):
+        item = FakeURLItem()
+        item.title = '【翻唱】Lemon 米津玄师'
+        self.audio(item)
+        artwork.resolve(item, {'title': item.title, 'thumbnail': 'http://video.jpg'}, providers=[lambda q: []])
+        self.assertEqual([], self.card_lookups)
+        self.assertEqual([], self.shazam_calls)
+        self.assertEqual('', item.shazam)
+
+    def test_shazam_waits_for_download(self):
+        item = FakeURLItem()
+        item.title = 'some untitled upload'
+        self.heard = {'title': 'Lemon', 'artists': ['米津玄师'], 'album': 'STRAY SHEEP',
+                      'image': 'http://shazam/1000x1000cc.jpg', 'source': 'shazam'}
+        artwork.resolve(item, {'title': item.title, 'thumbnail': 'http://video.jpg'}, providers=[lambda q: []])
+        self.assertEqual(('video', 'pending'), (item.artwork, item.shazam))
+        self.assertEqual([], self.shazam_calls)
+        # 还没下载完:不排队
+        artwork.ensure(item)
+        self.assertNotIn(item.id, artwork._queued)
+        # 下载完了:排队,轮到时只听歌识曲,不再查卡片
+        self.audio(item)
+        artwork.ensure(item)
+        self.assertIn(item.id, artwork._queued)
+        with artwork._lock:
+            artwork._queued.discard(item.id)
+        lookups = len(self.card_lookups)
+        artwork.resolve(item, None, providers=[lambda q: []])
+        self.assertEqual([item.path], self.shazam_calls)
+        self.assertEqual(lookups, len(self.card_lookups))
+        # 曲库没有:用 Shazam 自己的封面
+        self.assertEqual(('album', 'Lemon', '米津玄师', 'STRAY SHEEP', 'done'),
+                         (item.artwork, item.track, item.artist, item.album, item.shazam))
+        self.assertIn('http://shazam/1000x1000cc.jpg', self.fetched)
+        # 只试一次
+        artwork.ensure(item)
+        self.assertNotIn(item.id, artwork._queued)
+
+    def test_shazam_result_looked_up_in_catalog(self):
+        item = FakeURLItem()
+        item.title = 'some untitled upload'
+        self.audio(item)
+        self.heard = {'title': 'Lemon', 'artists': ['米津玄师'], 'album': 'STRAY SHEEP',
+                      'image': 'http://shazam/1000x1000cc.jpg', 'source': 'shazam'}
+        queries = []
+
+        def provider(q):
+            queries.append(q)
+            return [song('Lemon', ['米津玄師'], 255, album='STRAY SHEEP', image='http://catalog.jpg')] \
+                if 'Lemon' in q else []
+        artwork.resolve(item, {'title': item.title, 'thumbnail': 'http://video.jpg'}, providers=[provider])
+        # 已经缓存过的歌:同一轮里就认
+        self.assertEqual([item.path], self.shazam_calls)
+        self.assertEqual(['some untitled upload', 'Lemon'], queries)
+        self.assertEqual(('album', 'Lemon', '米津玄師'), (item.artwork, item.track, item.artist))
+        self.assertEqual('http://catalog.jpg', self.fetched[-1])
+
+    def test_shazam_nothing_heard(self):
+        item = FakeURLItem()
+        item.title = 'some untitled upload'
+        self.audio(item)
+        artwork.resolve(item, {'title': item.title, 'thumbnail': 'http://video.jpg'}, providers=[lambda q: []])
+        self.assertEqual(('video', '', 'done'), (item.artwork, item.track, item.shazam))
+
+    def test_shazam_retried_after_network_failure(self):
+        item = FakeURLItem()
+        item.title = 'some untitled upload'
+        self.audio(item)
+
+        def offline(path, duration=0, url=''):
+            raise recognize.ShazamUnavailable()
+        recognize.shazam = offline
+        artwork.resolve(item, {'title': item.title, 'thumbnail': 'http://video.jpg'}, providers=[lambda q: []])
+        self.assertEqual('pending', item.shazam)
+        artwork.ensure(item)
+        self.assertIn(item.id, artwork._queued)
+        with artwork._lock:
+            artwork._queued.discard(item.id)
+
+    def test_shazam_disabled(self):
+        var.config.set('bot', 'artwork_shazam', 'False')
+        item = FakeURLItem()
+        self.audio(item)
+        artwork.resolve(item, {'title': item.title, 'thumbnail': 'http://video.jpg'}, providers=[lambda q: []])
+        self.assertEqual([], self.shazam_calls)
+        self.assertEqual('', item.shazam)
+
+    def test_old_records_without_album_looked_up_again(self):
+        # 加「Music」卡片和听歌识曲之前查过、没找到专辑封面的:再查一次
+        item = FakeURLItem()
+        item.artwork, item.artwork_done, item.track = 'video', True, ''
+        del item.shazam
+        with open(artwork.path_for(item.id), 'wb') as f:
+            f.write(b'x')
+        artwork.ensure(item)
+        self.assertIn(item.id, artwork._queued)
+        with artwork._lock:
+            artwork._queued.discard(item.id)
+        # 找到了专辑封面的不动
+        item.artwork = 'album'
         artwork.ensure(item)
         self.assertNotIn(item.id, artwork._queued)
 

@@ -114,6 +114,17 @@ def check_imports():
             record("media.spotify 模块可用", "SKIP", "无 _spotify_available 标志")
     except Exception as e:
         record("import command", "FAIL", repr(e))
+    try:
+        # 听歌识曲的指纹在本地算(Rust 轮子),不联网也能验证镜像里装好了
+        from media import recognize
+        wav = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=12",
+                              "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"],
+                             capture_output=True, check=True, timeout=60).stdout
+        uri = recognize._signature(wav)[0]
+        record("shazamio-core 音频指纹", "PASS" if uri.startswith("data:audio/vnd.shazam.sig") else "FAIL",
+               uri[:40])
+    except Exception as e:
+        record("shazamio-core 音频指纹", "FAIL", repr(e))
 
 
 # --------------------------------------------------------------------------

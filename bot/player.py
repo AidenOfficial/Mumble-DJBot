@@ -73,10 +73,7 @@ class PlayerMixin:
     # =======================
 
     def _sponsorblock_categories(self):
-        if not var.config.getboolean('bot', 'sponsorblock', fallback=False):
-            return []
-        raw = var.config.get('bot', 'sponsorblock_categories', fallback='music_offtopic')
-        return [c.strip() for c in raw.split(',') if c.strip()]
+        return sponsorblock.configured_categories()
 
     def _sponsorblock_prefetch(self, wrapper):
         """后台查询这首歌要跳过的片段(结果按条目 id 缓存,重播/续播复用)。"""
