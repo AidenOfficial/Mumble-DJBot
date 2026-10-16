@@ -56,6 +56,7 @@ class URLItem(BaseItem):
             self.artist = ""
             self.album = ""
             self.track = None  # 曲库里的正式歌名;None = 还没查过,'' = 查过但没匹配到
+            self.shazam = ''  # 听歌识曲:'' = 不需要,'pending' = 等音频下载好,'done' = 试过了
         else:
             super().__init__(from_dict)
             self.url = from_dict['url']
@@ -69,6 +70,7 @@ class URLItem(BaseItem):
             self.artist = from_dict.get('artist', '')
             self.album = from_dict.get('album', '')
             self.track = from_dict.get('track')
+            self.shazam = from_dict.get('shazam')  # 旧记录没有(None):见 artwork._done
 
         self.downloading = False
         # Fraction in [0.0, 1.0] of the current download, updated by the
@@ -394,6 +396,7 @@ class URLItem(BaseItem):
                 if not self.thumbnail:
                     self._read_thumbnail_from_file(base_path + ".jpg")
                 self.version += 1  # notify wrapper to save me
+                artwork.ensure(self)  # 等着听歌识曲的,现在有音频了
                 self._enforce_cache_limit()
                 return True
             else:
@@ -514,6 +517,7 @@ class URLItem(BaseItem):
         dict['artist'] = self.artist
         dict['album'] = self.album
         dict['track'] = self.track
+        dict['shazam'] = self.shazam
 
         return dict
 

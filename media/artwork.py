@@ -376,6 +376,35 @@ def choose_match(results, cand, haystack, duration, video_title):
     return None
 
 
+def music_candidate(cards, title, haystack):
+    """YouTube「Music」卡片(recognize.youtube_music)→ Candidate 或 None。
+    卡片是 Content ID 的认领结果,不全可信。实测:MV 配成别人的同名歌("El Amante" → Thiago Matheus
+    的 "O Amante")、配成合唱/Live 版("Perfect" → "Perfect Duet (with Beyoncé)")、歌词视频列一串
+    不相干的歌、卡片歌名就是视频标题。所以:
+      - 只有一张卡片才用(多张是串烧/合集或 BGM 列表);
+      - 卡片上的歌手要在标题/简介/标签/UP 主里出现过;
+      - 标题里能拆出同一种文字的歌名时,要和卡片歌名对得上(一个包含另一个);
+        文字不同("Fireworks" / 打上花火)可能是译名,信卡片;
+      - 对得上时用两者里短的那个:多出来的部分是版本标注,播放的是视频里那一版。"""
+    if len(cards) != 1:
+        return None
+    track, artist = (cards[0].get('title') or '').strip(), (cards[0].get('artist') or '').strip()
+    want = key(track)
+    if not want or not artist or words(artist) in words(track):  # "YOASOBI - 群青 / THE FIRST TAKE"
+        return None
+    if not artist_in([artist], haystack):
+        return None
+    same_script = False
+    for c in parse_title(title):
+        k = key(c.track)
+        if not k:
+            continue
+        if want in k or (k in want and len(k) >= (3 if k.isascii() else 2)):
+            return Candidate(min(track, c.track, key=len), artist)
+        same_script = same_script or k.isascii() == want.isascii()
+    return None if same_script else Candidate(track, artist)
+
+
 # ---- 曲库 ------------------------------------------------------------------------
 
 _HEADERS = {'User-Agent': 'Mozilla/5.0'}
@@ -390,13 +419,13 @@ def _throttle(name, gap):
     _last_call[name] = time.monotonic()
 
 
-def _get_json(name, url, gap, **kwargs):
+def _get_json(name, url, gap, method='GET', **kwargs):
     import requests
     if time.monotonic() < _blocked_until.get(name, 0):
         return None
     _throttle(name, gap)
     try:
-        r = requests.get(url, headers=kwargs.pop('headers', _HEADERS), timeout=8, **kwargs)
+        r = requests.request(method, url, headers=kwargs.pop('headers', _HEADERS), timeout=8, **kwargs)
         if r.status_code in (403, 429) or r.status_code >= 500:
             _blocked_until[name] = time.monotonic() + 120
             return None
@@ -495,9 +524,19 @@ def is_compilation(match):
         any(_COMPILATION.search(a or '') for a in match.get('artists') or [])
 
 
-def find_album(meta, providers=None):
-    """meta: title, duration, uploader, tags, description, track, artist。
-    返回 {title, artists, album, image, source} 或 None。providers 可注入(测试用)。"""
+def _haystack(meta):
+    """确认歌手用的文字:标题、UP 主、平台给的歌手、标签、简介开头。"""
+    return words(' '.join([
+        meta.get('title') or '', meta.get('uploader') or '', meta.get('artist') or '',
+        ' '.join(meta.get('tags') or []), (meta.get('description') or '')[:800],
+    ]))
+
+
+def find_album(meta, providers=None, guess=True):
+    """meta: title, duration, uploader, tags, description, track, artist, music。
+    music 是校验过的 YouTube「Music」卡片(music_candidate)。guess=False 时不再从视频标题猜歌名
+    (听歌识曲已经认出了是哪首)。返回 {title, artists, album, image, source} 或 None。
+    providers 可注入(测试用)。"""
     title = meta.get('title') or ''
     duration = meta.get('duration') or 0
     cands = []
@@ -506,16 +545,17 @@ def find_album(meta, providers=None):
         cands.append(Candidate(meta['track'], meta.get('artist') or ''))
     elif should_skip(title, duration):
         return None
-    for c in parse_title(title):
+    elif meta.get('music'):
+        cands.append(meta['music'])
+    for c in parse_title(title) if guess else []:
         if c not in cands:
             cands.append(c)
     if not cands:
         return None
 
-    haystack = words(' '.join([
-        title, meta.get('uploader') or '', meta.get('artist') or '',
-        ' '.join(meta.get('tags') or []), (meta.get('description') or '')[:800],
-    ]))
+    haystack = _haystack(meta)
+    if meta.get('music'):
+        haystack += words(meta['music'].artist)
     calls = itertools.count()
     queries_done = set()
     fallback = None  # 合辑封面:实在找不到原专辑时才用
@@ -614,13 +654,31 @@ def lookup_enabled():
     return var.config.getboolean('bot', 'artwork_lookup', fallback=True) if var.config else True
 
 
+def shazam_enabled():
+    return lookup_enabled() and (var.config.getboolean('bot', 'artwork_shazam', fallback=True)
+                                 if var.config else True)
+
+
+def _audio_ready(item):
+    path = getattr(item, 'path', '') or ''
+    return getattr(item, 'ready', '') == 'yes' and not getattr(item, 'downloading', False) \
+        and bool(path) and os.path.isfile(path)
+
+
 def _done(item):
     """曲库已经查过(查到/没查到都算)。上一版没有 artwork_done 字段:
     专辑/内嵌封面就算查过了,视频封面的再按新规则查一次。
-    更早的专辑封面条目没存正式歌名(track 是 None):再查一次补上。"""
-    if getattr(item, 'type', '') in URL_TYPES and getattr(item, 'artwork', '') == 'album' \
-            and getattr(item, 'track', '') is None:
-        return False
+    更早的专辑封面条目没存正式歌名(track 是 None):再查一次补上。
+    没有 shazam 字段的是加「Music」卡片和听歌识曲之前查的:没找到专辑封面的按新规则再查一次。
+    等着听歌识曲('pending')的,音频下载好了就接着认。"""
+    if getattr(item, 'type', '') in URL_TYPES:
+        if getattr(item, 'artwork', '') == 'album' and getattr(item, 'track', '') is None:
+            return False
+        state = getattr(item, 'shazam', None)
+        if state is None and getattr(item, 'artwork_done', False) and getattr(item, 'artwork', '') != 'album':
+            return False
+        if state == 'pending' and _audio_ready(item) and shazam_enabled():
+            return False
     return bool(getattr(item, 'artwork_done', False)) or getattr(item, 'artwork', '') in ('album', 'embedded')
 
 
@@ -742,8 +800,14 @@ def _video_step(item, info):
 
 
 def resolve(item, info=None, providers=None):
+    """找封面和正式歌名,依次:平台元数据 / YouTube「Music」卡片 → 按标题查曲库 → 视频封面;
+    都没有专辑封面时,等音频下载好再听歌识曲(_shazam_step)。"""
     if item.type == 'file':
         return _resolve_file(item, providers)
+    if getattr(item, 'artwork_done', False) and getattr(item, 'shazam', None) == 'pending':
+        if _audio_ready(item):
+            _shazam_step(item, providers)  # 前面几步早就做完了,只差听歌识曲
+        return
     info = info or {}
     if lookup_enabled() and not info.get('uploader') and not info.get('tags') and getattr(item, 'url', ''):
         # 从上次的队列恢复的条目没有 yt-dlp 信息:读一次,UP 主 / 标签 / 简介是确认歌手的主要依据
@@ -763,6 +827,18 @@ def resolve(item, info=None, providers=None):
     # "xxx - Topic" 是 YouTube 自动生成的歌手频道
     meta['uploader'] = re.sub(r'\s*-\s*topic$|vevo$', '', meta['uploader'], flags=re.I)
 
+    skipped = should_skip(meta['title'], meta['duration'])
+    known_album = info.get('album') or ''
+    if lookup_enabled() and meta['title'] and not meta['track'] and not skipped and youtube_music_enabled():
+        from media import recognize
+        cards = recognize.youtube_music(getattr(item, 'url', ''))
+        meta['music'] = music_candidate(cards, meta['title'], _haystack(meta))
+        if meta['music']:
+            # 歌名换成了标题里的(去掉了版本标注)时,卡片上的专辑不一定是这一版的
+            known_album = cards[0]['album'] if meta['music'].track == cards[0]['title'] else ''
+            log.info("artwork: YouTube music card for %s: %s - %s",
+                     item.format_title(), meta['music'].artist, meta['music'].track)
+
     found = False
     if lookup_enabled() and meta['title']:
         match = find_album(meta, providers)
@@ -771,14 +847,55 @@ def resolve(item, info=None, providers=None):
                 found = _apply(item, _fetch_image(match['image']), 'album', match)
             except Exception:
                 log.debug("artwork: album image download failed", exc_info=True)
-    if not found and not (item.artwork == 'video' and has_hd(item.id)):
-        _video_step(item, info)  # 查不到专辑封面:用视频封面
+    if not found:
+        # 曲库里没有,但平台 / Content ID 已经说了是哪首:至少把歌名记下来
+        known = Candidate(meta['track'], meta['artist']) if meta['track'] else meta.get('music')
+        if known and not getattr(item, 'track', ''):
+            item.track, item.artist, item.album = known.track, known.artist, known_album
+        if not (item.artwork == 'video' and has_hd(item.id)):
+            _video_step(item, info)  # 查不到专辑封面:用视频封面
     if not has_hd(item.id):
         item.artwork = 'none'
     if getattr(item, 'track', '') is None:
         item.track = ''  # 查过了,没有正式歌名,别再为它重查
+    # 标题明说是翻唱/现场/合集的不去认:认出来的是原曲,封面反而贴错
+    item.shazam = 'pending' if not found and not skipped and shazam_enabled() else ''
     item.artwork_done = True
     item.version += 1
+    if item.shazam == 'pending' and _audio_ready(item):
+        _shazam_step(item, providers)  # 已经缓存过的歌不用等下载
+
+
+def youtube_music_enabled():
+    return var.config.getboolean('bot', 'artwork_youtube_music', fallback=True) if var.config else True
+
+
+def _shazam_step(item, providers=None):
+    """听歌识曲,认出来后先按认出的歌名查曲库(歌手名和曲库其他歌一致),查不到用 Shazam 自己的封面。"""
+    from media import recognize
+    item.shazam = 'done'  # 认不出来也只试一次
+    item.version += 1
+    try:
+        found = recognize.shazam(item.path, getattr(item, 'duration', 0) or 0, getattr(item, 'url', ''))
+    except recognize.ShazamUnavailable:
+        item.shazam = 'pending'  # 没连上:下次校验(播放)时再试
+        return False
+    if not found:
+        return False
+    meta = {'title': item.title, 'duration': getattr(item, 'duration', 0) or 0,
+            'track': found['title'], 'artist': found['artists'][0]}
+    for match in (find_album(meta, providers, guess=False), found):
+        if not match or not match.get('image'):
+            continue
+        try:
+            if _apply(item, _fetch_image(match['image']), 'album', match):
+                return True
+        except Exception:
+            log.debug("artwork: image download failed for %s", match.get('source'), exc_info=True)
+    # 封面都下不来:歌名还是记下
+    item.track, item.artist, item.album = found['title'], found['artists'][0], found['album']
+    item.version += 1
+    return False
 
 
 def _resolve_file(item, providers=None):
