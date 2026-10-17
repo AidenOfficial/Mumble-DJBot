@@ -1,10 +1,13 @@
 # coding=utf-8
+import html
 import logging
+import threading
 
 from constants import tr_cli as tr
 import util
 import variables as var
 import media.playlist
+from media import lyrics
 
 from ._shared import send_multi_lines
 from .streaming import _cancel_spotify_feeders
@@ -95,6 +98,49 @@ def cmd_current_music(bot, user, text, command, parameter):
         bot.send_msg(current.format_current_playing(), text)
     else:
         bot.send_msg(tr('not_playing'), text)
+
+
+LYRICS_WAIT = 10  # 还没查过时最多等几秒(在单独的线程里等,不占命令线程)
+LYRICS_SOURCES = {'lrclib': 'LRCLIB', 'netease': 'lyrics_source_netease'}  # 后者是语言文件里的键
+
+
+def cmd_lyrics(bot, user, text, command, parameter):
+    if not lyrics.enabled():
+        bot.send_msg(tr('lyrics_disabled'), text)
+        return
+    current = var.playlist.current_item()
+    if not current:
+        bot.send_msg(tr('not_playing'), text)
+        return
+    item = current.item()
+    ident = lyrics.identity(item)
+    if ident is None:
+        bot.send_msg(tr('lyrics_unknown_song'), text)
+        return
+    if ident == 'waiting':
+        bot.send_msg(tr('lyrics_waiting'), text)
+        return
+    data = lyrics.get(item)
+    if data is not None:
+        _send_lyrics(bot, text, item, data)
+        return
+    threading.Thread(target=lambda: _send_lyrics(bot, text, item, lyrics.wait(item, LYRICS_WAIT)),
+                     name='LyricsReply', daemon=True).start()
+
+
+def _send_lyrics(bot, text, item, data):
+    if data is None:
+        bot.send_msg(tr('lyrics_pending'), text)
+        return
+    song = html.escape(f"{data.get('artist') or ''} - {data.get('title') or item.format_title()}".strip(' -'))
+    if data['status'] == 'instrumental':
+        bot.send_msg(tr('lyrics_instrumental', song=song), text)
+    elif data['status'] != 'found':
+        bot.send_msg(tr('lyrics_not_found', song=song), text)
+    else:
+        source = LYRICS_SOURCES.get(data.get('source'), data.get('source') or '')
+        source = tr(source) if source.startswith('lyrics_') else source
+        send_multi_lines(bot, [tr('lyrics_header', song=song, source=source)] + lyrics.chat_lines(data), text)
 
 
 def cmd_skip(bot, user, text, command, parameter):

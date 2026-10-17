@@ -20,6 +20,27 @@ export interface CurrentItem {
   skip_segments?: [number, number][]
   /** 后台下载中(预下载 / 边下边播)才有 */
   download?: { progress: number; speed: number; eta: number | null; stage: string }
+  /** 歌词状态,只有当前曲有;found / instrumental 时用 fetchLyrics 取内容 */
+  lyrics?: LyricsStatus
+}
+
+/** off = 没打开 lyrics_lookup;'' = 这种条目没有歌词(电台等);waiting = 还在认歌;pending = 正在查 */
+export type LyricsStatus = 'off' | '' | 'waiting' | 'pending' | 'found' | 'none' | 'instrumental'
+
+export interface Lyrics {
+  status: LyricsStatus
+  source?: string
+  title?: string
+  artist?: string
+  /** [歌词时间(秒), 原文, 翻译(没有是 '')];空数组表示只有不带时间轴的 plain */
+  lines?: [number, string, string][]
+  plain?: string
+  /** 条目时间比歌词时间晚多少秒(MV 片头);播放位置 - offset = 歌词时间 */
+  offset?: number
+  /** 时间轴对得上才跟着滚动 */
+  aligned?: boolean
+  /** 有人手动调过偏移 */
+  manual?: boolean
 }
 
 /** 当前曲还没出声时的准备进度 */
@@ -109,6 +130,10 @@ export type QueueAction =
   | { action: 'clear' }
 
 export const postQueue = (body: QueueAction) => postJson<BotStatus>('/api/queue', body)
+
+export const fetchLyrics = (id: string) => getJson<Lyrics>(`/api/lyrics/${encodeURIComponent(id)}`)
+export const postLyricsOffset = (id: string, offset: number) =>
+  postJson<Lyrics>(`/api/lyrics/${encodeURIComponent(id)}/offset`, { offset })
 
 /** 封面地址。small:队列行用的 100px 小图;否则高清图,带上 artwork 来源当版本号(换图后地址变化,缓存失效)。 */
 export function thumbnailUrl(id: string, opts: { small?: boolean; version?: string } = {}): string {

@@ -5,6 +5,7 @@ import Controls from './Controls.vue'
 import AddToPlaylist from './AddToPlaylist.vue'
 import FavButton from './FavButton.vue'
 import PrepPanel from './PrepPanel.vue'
+import LyricsPanel from './LyricsPanel.vue'
 import { formatTime, useStatus } from '../composables/useStatus'
 import { modeLabel, t, typeLabel } from '../i18n'
 
@@ -271,6 +272,9 @@ const sourceLabel = computed(() => typeLabel(current.value?.type ?? ''))
 
     <!-- controls -->
     <Controls />
+
+    <!-- 歌词(lyrics_lookup 打开时才有) -->
+    <LyricsPanel v-if="current" :current="current" :playhead="shownPlayhead" :can-seek="canSeek" @seek="seek" />
 
     <!-- queue summary -->
     <p v-if="status && !status.empty" class="text-sm" :style="{ color: 'var(--c-text-muted)' }">

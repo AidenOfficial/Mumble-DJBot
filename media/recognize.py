@@ -179,6 +179,9 @@ def parse_shazam(data):
     image = images.get('coverarthq') or images.get('coverart') or ''
     # Apple 的图床按路径里的尺寸出图,换成大图
     image = re.sub(r'/\d+x\d+(\w*)\.jpg$', rf'/{COVER_SIZE}x{COVER_SIZE}\1.jpg', image)
+    # matches[0].offset / timeskew:片段在原曲里的位置和速度偏差(歌词对时间轴用,见 lyrics._align)
+    first = data['matches'][0] or {}
+    offset, skew = first.get('offset'), first.get('timeskew')
     return {
         'title': track['title'].strip(),
         'artists': [(track.get('subtitle') or '').strip()],
@@ -186,7 +189,31 @@ def parse_shazam(data):
         'duration': 0,
         'image': image or None,
         'source': 'shazam',
+        'offset': float(offset) if isinstance(offset, (int, float)) else None,
+        'timeskew': float(skew) if isinstance(skew, (int, float)) else 0.0,
     }
+
+
+def _recognize_clip(path, start):
+    """截 path 从 start 秒开始的一段去认。返回同 parse_shazam;认不出 / 截不出是 None,
+    请求失败抛 ShazamUnavailable。"""
+    from media import artwork
+    try:
+        uri, samplems, timestamp = _signature(_clip(path, start))
+    except Exception as e:
+        log.debug("recognize: no signature for %s at %.0fs: %s", path, start, e)
+        return None
+    lang, country = _language()
+    body = {'timezone': 'Asia/Tokyo', 'signature': {'uri': uri, 'samplems': samplems},
+            'timestamp': timestamp, 'context': {}, 'geolocation': {}}
+    data = artwork._get_json('shazam', SHAZAM_URL.format(lang=lang, country=country,
+                                                         u1=str(uuid.uuid4()).upper(),
+                                                         u2=str(uuid.uuid4()).upper()),
+                             SHAZAM_GAP, method='POST', json=body,
+                             headers=dict(SHAZAM_HEADERS, **{'Accept-Language': lang}))
+    if data is None:
+        raise ShazamUnavailable()  # 网络出错 / 被限流:别接着试
+    return parse_shazam(data)
 
 
 def shazam(path, duration=0, url=''):
@@ -194,27 +221,11 @@ def shazam(path, duration=0, url=''):
     请求失败抛 ShazamUnavailable。"""
     if not shazam_available():
         return None
-    from media import artwork
     segments = sponsorblock.fetch_segments(url, sponsorblock.configured_categories()) if url else []
-    lang, country = _language()
     for start in clip_offsets(duration, segments):
-        try:
-            uri, samplems, timestamp = _signature(_clip(path, start))
-        except Exception as e:
-            log.debug("recognize: no signature for %s at %.0fs: %s", path, start, e)
-            continue
-        body = {'timezone': 'Asia/Tokyo', 'signature': {'uri': uri, 'samplems': samplems},
-                'timestamp': timestamp, 'context': {}, 'geolocation': {}}
-        data = artwork._get_json('shazam', SHAZAM_URL.format(lang=lang, country=country,
-                                                             u1=str(uuid.uuid4()).upper(),
-                                                             u2=str(uuid.uuid4()).upper()),
-                                 SHAZAM_GAP, method='POST', json=body,
-                                 headers=dict(SHAZAM_HEADERS, **{'Accept-Language': lang}))
-        if data is None:
-            raise ShazamUnavailable()  # 网络出错 / 被限流:别接着试
-        match = parse_shazam(data)
+        match = _recognize_clip(path, start)
         if match:
             log.info("recognize: shazam matched %s at %.0fs: %s - %s",
                      path, start, match['artists'][0], match['title'])
-            return match
+            return dict(match, clip_start=start)
     return None

@@ -34,6 +34,7 @@ from .playback import (
     cmd_clear,
     cmd_current_music,
     cmd_last,
+    cmd_lyrics,
     cmd_mode,
     cmd_pause,
     cmd_play,
@@ -91,6 +92,7 @@ def register_all_commands(bot):
     bot.register_command(commands('joinme'), cmd_joinme, access_outside_channel=True)
     bot.register_command(commands('last'), cmd_last)
     bot.register_command(commands('list_file'), cmd_list_file)
+    bot.register_command(commands('lyrics'), cmd_lyrics)
     bot.register_command(commands('mode'), cmd_mode)
     bot.register_command(commands('pause'), cmd_pause)
     bot.register_command(commands('play'), cmd_play)

@@ -268,6 +268,9 @@ def main():
     # 高清封面 / 专辑封面(后台排队获取)
     from media import artwork
     artwork.start()
+    # 歌词(lyrics_lookup 打开时才会排进任务)
+    from media import lyrics
+    lyrics.start()
 
     # ============================
     #   Crash safety / watchdog

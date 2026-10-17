@@ -58,6 +58,20 @@ export const ja: Record<Key, Msg> = {
   'np.paused': '一時停止中',
   'np.unreachable': 'bot に接続できません：{error}',
 
+  // ---- 歌词 ----
+  'lyrics.title': '歌詞',
+  'lyrics.source': '{source} より',
+  'lyrics.netease': 'NetEase Cloud Music',
+  'lyrics.waiting': '曲を識別中…',
+  'lyrics.pending': '歌詞を検索中…',
+  'lyrics.none': 'この曲の歌詞は見つかりませんでした。',
+  'lyrics.instrumental': 'インストゥルメンタルのため歌詞はありません。',
+  'lyrics.unaligned': 'このバージョンは歌詞のタイミングと長さが合わないため、自動スクロールしません。±0.5s で合わせると追従します。',
+  'lyrics.offset': 'オフセット {s} 秒',
+  'lyrics.earlier': '歌詞を早める',
+  'lyrics.later': '歌詞を遅らせる',
+  'lyrics.reset': 'リセット',
+
   'ctl.pause': '一時停止',
   'ctl.play': '再生',
   'ctl.skip': 'スキップ',
