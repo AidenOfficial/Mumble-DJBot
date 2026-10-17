@@ -8,7 +8,7 @@ import time
 
 import variables as var
 from constants import tr_cli as tr
-from media import sponsorblock
+from media import lyrics, sponsorblock
 from media.item import ValidationFailedError, PreparationFailedError
 
 
@@ -217,6 +217,11 @@ class PlayerMixin:
         # 跳过 SponsorBlock 片段时的重启不算新的一首:不播报、不计入统计
         quiet = getattr(self, '_quiet_relaunch', False)
         self._quiet_relaunch = False
+        if start_from == 0 and not quiet:
+            try:
+                lyrics.ensure(music_wrapper.item(), urgent=True)  # 没打开 lyrics_lookup 时什么都不做
+            except Exception:
+                self.log.debug("bot: could not queue lyrics", exc_info=True)
 
         # Statistics: one history row per playback start (a start_from > 0
         # is a resume or a stream-while-downloading relaunch, not a play;

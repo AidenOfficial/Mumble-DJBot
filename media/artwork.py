@@ -443,18 +443,25 @@ _NETEASE_HEADERS = {'Referer': 'https://music.163.com/', 'User-Agent': 'Mozilla/
 
 
 def search_netease(query):
-    data = _get_json('netease', 'https://music.163.com/api/search/get', 0.5,
+    # 旧的 /api/search/get 现在返回的是不相关的歌(2026-10 起),用网页客户端的 cloudsearch
+    data = _get_json('netease', 'https://music.163.com/api/cloudsearch/pc', 0.5,
                      params={'s': query, 'type': 1, 'limit': 10}, headers=_NETEASE_HEADERS)
     songs = ((data or {}).get('result') or {}).get('songs') or []
-    return [{
-        'title': s.get('name') or '',
-        'artists': [a.get('name') or '' for a in s.get('artists') or []],
-        'album': (s.get('album') or {}).get('name') or '',
-        'duration': (s.get('duration') or 0) / 1000,
-        'image': None,  # 搜索结果不带封面地址,选中后再查详情
-        'netease_id': s.get('id'),
-        'source': 'netease',
-    } for s in songs]
+    results = []
+    for s in songs:
+        album = s.get('al') or {}
+        pic = re.sub(r'^http:', 'https:', album.get('picUrl') or '')
+        results.append({
+            'title': s.get('name') or '',
+            'artists': [a.get('name') or '' for a in s.get('ar') or []],
+            'album': album.get('name') or '',
+            'duration': (s.get('dt') or 0) / 1000,
+            # 没带封面地址时选中后再查详情(_with_image)
+            'image': f"{pic}?param={ALBUM_SIZE}y{ALBUM_SIZE}" if pic else None,
+            'netease_id': s.get('id'),
+            'source': 'netease',
+        })
+    return results
 
 
 def _netease_cover(song_id):
@@ -731,11 +738,24 @@ def _run():
         try:
             resolve(item, info)
             _persist(item)
+            _notify_lyrics(item)
         except Exception:
             log.warning("artwork: failed for %s", getattr(item, 'id', '?'), exc_info=True)
         finally:
             with _lock:
                 _active.discard(item.id)
+
+
+def _notify_lyrics(item):
+    """认出歌名后,正在播放的那首接着查歌词(歌刚开播时可能还没认出来)。"""
+    playlist = getattr(var, 'playlist', None)
+    try:
+        current = playlist.current_item() if playlist is not None and len(playlist) else None
+    except Exception:
+        return
+    if current is not None and current.id == item.id:
+        from media import lyrics
+        lyrics.ensure(item, urgent=True)
 
 
 def _quick_video(item, info):

@@ -66,6 +66,20 @@ export const en = {
   'np.paused': 'paused',
   'np.unreachable': "Can't reach the bot: {error}",
 
+  // ---- 歌词 ----
+  'lyrics.title': 'Lyrics',
+  'lyrics.source': 'from {source}',
+  'lyrics.netease': 'NetEase Cloud Music',
+  'lyrics.waiting': 'Identifying the song…',
+  'lyrics.pending': 'Looking for lyrics…',
+  'lyrics.none': 'No lyrics found for this song.',
+  'lyrics.instrumental': 'Instrumental - no lyrics.',
+  'lyrics.unaligned': "This version's length doesn't match the lyrics' timing, so they won't scroll along. Use ±0.5s to line them up.",
+  'lyrics.offset': 'offset {s}s',
+  'lyrics.earlier': 'Show lyrics earlier',
+  'lyrics.later': 'Show lyrics later',
+  'lyrics.reset': 'Reset',
+
   // ---- 播放控制 ----
   'ctl.pause': 'Pause',
   'ctl.play': 'Play',

@@ -58,6 +58,20 @@ export const zhCN: Record<Key, Msg> = {
   'np.paused': '已暂停',
   'np.unreachable': '连不上 bot：{error}',
 
+  // ---- 歌词 ----
+  'lyrics.title': '歌词',
+  'lyrics.source': '来自 {source}',
+  'lyrics.netease': '网易云音乐',
+  'lyrics.waiting': '正在识别歌曲…',
+  'lyrics.pending': '正在查找歌词…',
+  'lyrics.none': '没有找到这首歌的歌词。',
+  'lyrics.instrumental': '纯音乐,没有歌词。',
+  'lyrics.unaligned': '这个版本和歌词的时长对不上,歌词不跟随滚动。用 ±0.5s 对齐后会开始跟随。',
+  'lyrics.offset': '偏移 {s} 秒',
+  'lyrics.earlier': '歌词提前',
+  'lyrics.later': '歌词延后',
+  'lyrics.reset': '重置',
+
   'ctl.pause': '暂停',
   'ctl.play': '播放',
   'ctl.skip': '下一首',

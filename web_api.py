@@ -8,6 +8,7 @@ without a circular import.
 
 import base64
 import hashlib
+import math
 import os
 import time
 
@@ -17,7 +18,7 @@ import media.playlist
 import util
 import variables as var
 import web_search
-from media import artwork
+from media import artwork, lyrics
 from media.cache import get_cached_wrapper_from_scrap
 from web_users import current_user_name, requester_display_name
 
@@ -83,6 +84,9 @@ def _status_payload():
                 current, var.playlist.current_index)
             # 正在播放的那首优先准备封面(已经有了就是一次文件检查)
             artwork.ensure(current.item(), urgent=True)
+            # 歌词状态(off / waiting / pending / found / none / instrumental),found 时前端再来取
+            lyrics.ensure(current.item(), urgent=True)
+            payload['current']['lyrics'] = lyrics.status(current.item())
             # SponsorBlock 要跳过的片段,前端在进度条上标出来
             skip_for = getattr(bot, 'skip_segments_for', None)
             payload['current']['skip_segments'] = skip_for(current.id) if skip_for else []
@@ -371,6 +375,39 @@ def create_blueprint(requires_auth):
             stats['top_users'] = [{'user': u, 'count': c}
                                   for u, c in sorted(merged.items(), key=lambda kv: -kv[1])]
         return jsonify(stats)
+
+    @api.route('/lyrics/<item_id>', methods=['GET'])
+    @requires_auth
+    def api_lyrics(item_id):
+        """条目的歌词(media/lyrics.py)。还没查好时只有 status,前端看状态轮询里的
+        current.lyrics 变成 found 再来取。"""
+        item = var.cache.get_item_by_id(item_id)
+        if item is None:
+            abort(404)
+        data = lyrics.get(item)
+        if data is None:
+            lyrics.ensure(item, urgent=True)
+            return jsonify({'status': lyrics.status(item)})
+        return jsonify(lyrics.to_json(data))
+
+    @api.route('/lyrics/<item_id>/offset', methods=['POST'])
+    @requires_auth
+    def api_lyrics_offset(item_id):
+        """手动调时间轴:offset 是条目时间比歌词时间晚多少秒,所有人共用。"""
+        item = var.cache.get_item_by_id(item_id)
+        payload = request.get_json(silent=True) or {}
+        try:
+            offset = float(payload.get('offset'))
+        except (TypeError, ValueError):
+            abort(400)
+        if not math.isfinite(offset):
+            abort(400)
+        if item is None:
+            abort(404)
+        data = lyrics.set_offset(item, offset)
+        if data is None:
+            abort(409)
+        return jsonify(lyrics.to_json(data))
 
     @api.route('/thumbnail/<item_id>', methods=['GET'])
     @requires_auth
