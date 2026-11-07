@@ -29,6 +29,14 @@ updates:
     # npm 包发布后过一周再升,躲开被投毒后很快撤回的版本
     cooldown:
       default-days: 7
+    # 这两个包的大版本不跟:
+    #   @types/node —— 要和运行时一致,镜像和 CI 固定在 Node 22
+    #   typescript  —— 7.x 是 Go 重写的编译器,vue-tsc 3.x 不支持(构建直接报错)
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       webui-minor-patch:
         patterns: ["*"]

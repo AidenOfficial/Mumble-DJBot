@@ -411,3 +411,24 @@ def parse_cookie_file(cookiefile):
                 lineFields = line.strip().split('\t')
                 cookies[lineFields[5]] = lineFields[6]
     return cookies
+
+
+# configuration.default.ini 里公开的占位值。用它签名 Cookie 等于任何人都能伪造会话。
+DEFAULT_FLASK_SECRET = 'ChangeThisPassword'
+
+
+def resolve_flask_secret():
+    """返回给 Flask 签名会话 Cookie 用的密钥。
+
+    未配置或仍是公开的默认值时，改用本进程随机生成的密钥并打警告；
+    代价只是重启后已登录的网页会话失效，需要重新登录。
+    """
+    import secrets
+
+    secret = (var.config.get('webinterface', 'flask_secret', fallback='') or '').strip()
+    if not secret or secret == DEFAULT_FLASK_SECRET:
+        log.warning("web: flask_secret is unset or the public default; using a random "
+                    "per-process secret. Set [webinterface] flask_secret to keep sessions "
+                    "across restarts.")
+        return secrets.token_hex(32)
+    return secret
